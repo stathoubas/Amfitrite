@@ -1,5 +1,5 @@
-# Evoroads tools
-Developed AI tools & analyses for road risk identification for the Evoroads project
+# Amfitrite tools
+Developed AI tools & analyses for the Amfitrite project
 
 ## Contributing Guide
 
