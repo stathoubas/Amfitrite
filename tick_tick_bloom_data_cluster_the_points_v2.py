@@ -162,8 +162,10 @@ def perform_clustering_with_size(df: pd.DataFrame, time_window_days: int, max_di
 df = pd.read_csv(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\CAML_cyanobacteria_abundance_20211229_R1_date_extended.csv")
 
 
-df_out = perform_clustering_with_size(df, 20, 2000)
-df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\junk4.xlsx", index = False)
+#df_out = perform_clustering_with_size(df, 20, 2000)
+#df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\junk4.xlsx", index = False)
         
     
+df_out = perform_clustering_with_size(df, 15, 2560)
+df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\clustered_data_15days_2560m.xlsx", index = False)
     

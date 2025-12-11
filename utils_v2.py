@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+Created on Wed Dec 10 15:09:07 2025
+
+@author: K. Pikounis
+"""
+
+# -*- coding: utf-8 -*-
+"""
 Created on Thu Dec  4 17:35:50 2025
 
 @author: K. Pikounis
@@ -71,19 +78,21 @@ def get_date_range(date, time_buffer_days=15):
 def extract_and_save_tile(
     item,
     points_df,
+    all_data,
     initial_pixel_size=100,
     save_data=False,
     output_path=None, 
     print_images = True):
+    
     print("--- Starting Tile Extraction and Processing ---")
     
-    # 1. Setup
+    # 1. Setup CRS and Center
     target_crs = CRS.from_string(item.properties["proj:code"])
     center_lat = points_df['lat'].mean()
     center_lon = points_df['lon'].mean()
     print(f"Center Point (Lat/Lon): ({center_lat:.4f}, {center_lon:.4f})")
     
-    # Calculate bounding box in UTM
+    # 2. Calculate Clipping Box in UTM
     points_gdf = gpd.GeoDataFrame(
         points_df, 
         geometry=gpd.points_from_xy(points_df.lon, points_df.lat), 
@@ -107,9 +116,56 @@ def extract_and_save_tile(
     print(f"Final Tile Dimension (10m pixels): {final_pixel_side} x {final_pixel_side}")
     
     clip_bbox_utm = (min_x_final, min_y_final, max_x_final, max_y_final)
-    transformer_latlon_to_utm = Transformer.from_crs(CRS.from_string("EPSG:4326"), target_crs, always_xy=True)
     
-    # 2. Asset Clipping and ALIGNMENT
+    transformer_latlon_to_utm = Transformer.from_crs(CRS.from_string("EPSG:4326"), target_crs, always_xy=True)
+    transformer_utm_to_latlon = Transformer.from_crs(target_crs, CRS.from_string("EPSG:4326"), always_xy=True)
+
+    # --- 3. SPATIAL FILTER: USE CLIPPED BOX ---
+    corners_x = [min_x_final, max_x_final, min_x_final, max_x_final]
+    corners_y = [min_y_final, min_y_final, max_y_final, max_y_final]
+    corners_lon, corners_lat = transformer_utm_to_latlon.transform(corners_x, corners_y)
+    
+    search_min_lon = min(corners_lon)
+    search_max_lon = max(corners_lon)
+    search_min_lat = min(corners_lat)
+    search_max_lat = max(corners_lat)
+    
+    sel_date_dt = pd.to_datetime(item.properties["datetime"]).tz_localize(None)
+    time_window = timedelta(days=20)
+    
+    search_df = all_data.copy()
+    
+    spatial_mask = (
+        (search_df['lat'] >= search_min_lat) & (search_df['lat'] <= search_max_lat) &
+        (search_df['lon'] >= search_min_lon) & (search_df['lon'] <= search_max_lon)
+    )
+    
+    search_df['date_dt'] = pd.to_datetime(search_df['date'])
+    temporal_mask = (
+        (search_df['date_dt'] >= (sel_date_dt - time_window)) &
+        (search_df['date_dt'] <= (sel_date_dt + time_window))
+    )
+    
+    potential_points = search_df[spatial_mask & temporal_mask].copy()
+    existing_uids = points_df['uid'].unique()
+    additional_points_df = potential_points[~potential_points['uid'].isin(existing_uids)].copy()
+    
+    # --- 4. METADATA PREP ---
+    cols_to_keep = ['uid', 'lat', 'lon', 'date', 'abun', 'severity']
+    if 'severity' not in points_df.columns:
+        points_df['severity'] = 3
+
+    def clean_df_for_json(df, cols):
+        temp = df[cols].copy()
+        if 'date' in temp.columns:
+            temp['date'] = temp['date'].astype(str)
+        return temp.to_dict('records')
+
+    points_data_list = clean_df_for_json(points_df, cols_to_keep)
+    additional_points_list = clean_df_for_json(additional_points_df, cols_to_keep)
+    print(f"Found {len(additional_points_list)} additional points inside the clipped area.")
+
+    # 5. Asset Clipping
     band_gsd_map = {
         "B02": 10, "B03": 10, "B04": 10, "B08": 10, "visual": 10, "AOT": 10, "WVP": 60,
         "B05": 20, "B06": 20, "B07": 20, "B8A": 20, "SCL": 20, "B11": 20, "B12": 20,
@@ -119,7 +175,6 @@ def extract_and_save_tile(
     clipped_data = {}
     print("--- Clipping and Aligning Rasters ---")
     
-    # 2a. Load Reference (B04)
     b04_href = pc.sign(item.assets["B04"].href)
     b04_ds = rioxarray.open_rasterio(b04_href)
     b04_clip = b04_ds.rio.clip_box(
@@ -129,9 +184,7 @@ def extract_and_save_tile(
     )
     b04_clip = b04_clip.isel(y=slice(0, final_pixel_side), x=slice(0, final_pixel_side))
     clipped_data["B04"] = b04_clip.squeeze() 
-    print(f"Clipped B04 (Reference): Shape {b04_clip.shape}")
-
-    # 2b. Align others
+    
     for asset_key, gsd in band_gsd_map.items():
         if asset_key == "B04": continue
         
@@ -151,10 +204,7 @@ def extract_and_save_tile(
             clipped_data[asset_key] = ds_aligned.squeeze()
         else:
              clipped_data[asset_key] = ds_aligned
-        
-        print(f"Clipped {asset_key}: Shape {ds_aligned.shape}")
-
-    # --- SAVE RAW DATA (Unmodified) ---
+    
     if save_data:
         output_dir = Path(output_path)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -162,10 +212,8 @@ def extract_and_save_tile(
         for key, da in clipped_data.items():
             da.rio.to_raster(output_dir / f"{key}_raw.tif")
 
-    # --- 3. Calculate Indices (Scaled for Vis/Preview) ---
-    print("--- Calculating Indices for Visualization ---")
+    # 6. Calculate Indices
     SCALE_FACTOR = 10000.0 
-    
     b04_ref = (clipped_data["B04"] / SCALE_FACTOR).astype(np.float32)
     b05_ref = (clipped_data["B05"] / SCALE_FACTOR).astype(np.float32)
     b07_ref = (clipped_data["B07"] / SCALE_FACTOR).astype(np.float32)
@@ -173,76 +221,98 @@ def extract_and_save_tile(
     
     sum_b8_b4 = b08_ref + b04_ref
     ndvi = (b08_ref - b04_ref) / sum_b8_b4.where(sum_b8_b4 != 0, np.nan) 
-    
     sum_b7_b5 = b07_ref + b05_ref
     ndci = (b07_ref - b05_ref) / sum_b7_b5.where(sum_b7_b5 != 0, np.nan) 
     
-    # Store indices for visualization
     vis_data = clipped_data.copy()
     vis_data["NDVI"] = ndvi
     vis_data["NDCI"] = ndci
 
-    # --- 4. Save Visual Previews (WITH RED X MARKERS) ---
+    # 7. Prepare Plotting Coordinates (UTM)
+    plot_df = pd.concat([points_df, additional_points_df], ignore_index=True)
+    plot_x, plot_y = transformer_latlon_to_utm.transform(plot_df.lon.values, plot_df.lat.values)
+    
+    def get_color(sev):
+        try:
+            val = int(sev)
+            if val == 1: return 'green'
+            if val == 2: return 'orange'
+            if val == 3: return 'red'
+        except:
+            s = str(sev).lower()
+            if 'low' in s: return 'green'
+            if 'mod' in s: return 'orange'
+            if 'high' in s: return 'red'
+        return 'red'
+        
+    plot_colors = plot_df['severity'].apply(get_color).tolist()
+
+    # 8. Save Visual Previews
     if save_data:
-        print("--- Saving Visual Previews (with markers) ---")
+        print("--- Saving Visual Previews (with Color Coded Markers) ---")
         
-        # Prepare coordinates for plotting
-        point_x, point_y = transformer_latlon_to_utm.transform(points_df.lon.values, points_df.lat.values)
-        
-        # Colormap setup
         colors = ['white', 'white', 'black', 'black', 'green', 'saddlebrown', 'lightblue', 'grey', 'grey', 'grey', 'grey']
         cmap_scl = ListedColormap(colors)
         bounds = np.arange(12)
         norm_scl = BoundaryNorm(bounds, cmap_scl.N)
 
-        # Helper to save plot with markers
         def save_plot_with_points(da, key, cmap=None, norm=None, vmin=None, vmax=None, rgb=False):
             fig, ax = plt.subplots(figsize=(10, 10))
             
-            extent = [da.x.min(), da.x.max(), da.y.min(), da.y.max()]
+            # CRITICAL: Define extent explicitly in UTM coordinates
+            # This ensures the ax.scatter(UTM_X, UTM_Y) aligns perfectly with the image
+            extent_utm = [da.x.min(), da.x.max(), da.y.min(), da.y.max()]
             
             if rgb:
-                da.plot.imshow(ax=ax, rgb="band", robust=True)
+                # Convert xarray to numpy for matplotlib imshow to avoid xarray overrides
+                # Transpose to (H, W, C) for plotting
+                arr = da.transpose('y', 'x', 'band').values
+                
+                # Robust scaling manual (2% - 98%) to avoid dark images
+                vmin, vmax = np.nanpercentile(arr, [2, 98])
+                arr_scaled = np.clip((arr - vmin) / (vmax - vmin), 0, 1)
+                
+                ax.imshow(arr_scaled, extent=extent_utm, origin='upper')
+                
             elif key == "SCL":
-                ax.imshow(da.values, cmap=cmap, norm=norm, extent=extent, origin='upper')
+                ax.imshow(da.values, cmap=cmap, norm=norm, extent=extent_utm, origin='upper')
             else:
                 robust = True if vmin is None else False
-                da.plot.imshow(ax=ax, cmap=cmap, robust=robust, add_colorbar=False, 
-                               origin='upper', extent=extent, norm=norm, vmin=vmin, vmax=vmax)
+                # For single bands, da.values is (H, W) or (1, H, W). Ensure it's 2D
+                arr_2d = da.values.squeeze()
+                
+                if robust:
+                   vmin, vmax = np.nanpercentile(arr_2d, [2, 98])
+                
+                ax.imshow(arr_2d, cmap=cmap, extent=extent_utm, origin='upper', vmin=vmin, vmax=vmax)
             
-            # OVERLAY RED X
-            ax.scatter(point_x, point_y, c='red', s=100, marker='x', linewidths=2.5)
-            ax.set_axis_off() # clean look
+            # Now plot the X markers
+            # zorder=10 ensures they are ON TOP of the image
+            ax.scatter(plot_x, plot_y, c=plot_colors, s=150, marker='x', linewidths=3, zorder=10)
             
-            plt.savefig(output_dir / f"{key}_preview.png", bbox_inches='tight')
+            ax.set_axis_off() 
+            plt.savefig(output_dir / f"{key}_preview.png", bbox_inches='tight', pad_inches=0)
             plt.close(fig)
 
-        # Save all bands + indices
         for key in vis_data.keys():
             da = vis_data[key]
-            
-            if key == "visual":
-                save_plot_with_points(da, key, rgb=True)
-            elif key == "SCL":
-                save_plot_with_points(da, key, cmap=cmap_scl, norm=norm_scl)
-            elif key == "NDVI":
-                save_plot_with_points(da, key, cmap="RdYlGn", vmin=-1, vmax=1)
-            elif key == "NDCI":
-                save_plot_with_points(da, key, cmap="jet", vmin=-1, vmax=1)
-            else:
-                # Default bands (grayscale)
-                save_plot_with_points(da, key, cmap="gray")
+            if key == "visual": save_plot_with_points(da, key, rgb=True)
+            elif key == "SCL": save_plot_with_points(da, key, cmap=cmap_scl, norm=norm_scl)
+            elif key == "NDVI": save_plot_with_points(da, key, cmap="RdYlGn", vmin=-1, vmax=1)
+            elif key == "NDCI": save_plot_with_points(da, key, cmap="jet", vmin=-1, vmax=1)
+            else: save_plot_with_points(da, key, cmap="gray")
 
-        # Save metadata
         metadata = {
             "item_id": item.id,
-            "uid":points_df.iloc[0]["uid"], 
-            "abun":max(points_df["abun"].to_list()),
+            "per_clouds": item.properties.get("per_clouds", "N/A"),
+            "uid": points_df.iloc[0]["uid"], 
+            "abun": max(points_df["abun"].to_list()),
             "tile_size_10m_pixels": final_pixel_side,
             "date": item.properties["datetime"].split('T')[0],
             "center_lat": center_lat,
             "center_lon": center_lon,
-            "points_data": points_df[['uid', 'lat', 'lon', 'date']].to_dict('records')
+            "points_data": points_data_list,            
+            "additional_points": additional_points_list 
         }
         with open(output_dir / "metadata.json", "w") as f:
             json.dump(metadata, f, indent=4)
@@ -250,37 +320,7 @@ def extract_and_save_tile(
         print(f"Data successfully saved to: {output_dir.resolve()}")
         
     if print_images:
-        # --- 5. LIVE VISUALIZATION ---
         print("\n--- Displaying Images ---")
-        
-        # Points for overlay (calculated above)
-        assets_to_plot = {
-            "visual": ("True Color (RGB)", None, None, False, None, None),
-            "B04": ("Band 4 (Red)", "gray", None, True, None, None),
-            "B08": ("Band 8 (NIR)", "gray", None, True, None, None),
-            "SCL": ("Scene Classification (SCL)", cmap_scl, norm_scl, False, None, None),
-            "NDVI": ("NDVI (Vegetation)", "RdYlGn", None, True, -1, 1),
-            "NDCI": ("NDCI (Chlorophyll)", "jet", None, True, -1, 1) 
-        }
-    
-        for key, (title, cmap, norm, add_colorbar, vmin, vmax) in assets_to_plot.items():
-            da = vis_data[key]
-            
-            fig, ax = plt.subplots(figsize=(12, 12))
-            extent = [da.x.min(), da.x.max(), da.y.min(), da.y.max()]
-            
-            if key == "visual":
-                da.plot.imshow(ax=ax, rgb="band", robust=True)
-            elif key == "SCL":
-                ax.imshow(da.values, cmap=cmap, norm=norm, extent=extent, origin='upper')
-            else:
-                robust_setting = True if vmin is None else False
-                da.plot.imshow(ax=ax, cmap=cmap, robust=robust_setting, add_colorbar=add_colorbar, 
-                               origin='upper', extent=extent, norm=norm, vmin=vmin, vmax=vmax)
-    
-            ax.scatter(point_x, point_y, c='red', s=100, marker='x', linewidths=2.5)
-            ax.set_title(f"{title}", fontsize=16)
-            plt.show()
 
 def predict_using_cyfi_pipeline(input_folder_path, 
                                 date_str, 
@@ -291,8 +331,6 @@ def predict_using_cyfi_pipeline(input_folder_path,
 
     # 1. Configuration
     features_config = FeaturesConfig()
-    
-    # Set Cloud Threshold to 7.5%
     CLOUD_THRESHOLD = 0.075 
     features_config.max_cloud_percent = CLOUD_THRESHOLD
 
@@ -305,7 +343,6 @@ def predict_using_cyfi_pipeline(input_folder_path,
     required_bands = features_config.use_sentinel_bands 
     data_store = {}
     
-    # Load SCL (for geometry and cloud check)
     try:
         scl_da = rioxarray.open_rasterio(input_dir / "SCL_raw.tif").squeeze()
         data_store["SCL"] = scl_da.values
@@ -314,19 +351,21 @@ def predict_using_cyfi_pipeline(input_folder_path,
         crs = scl_da.rio.crs
     except FileNotFoundError:
         print("Error: SCL_raw.tif not found. Run Part 1 first.")
-        return
+        return (False, "")
 
-    # Load Metadata (to retrieve original reference points AND to be updated later)
+    # Load Metadata (to retrieve reference points)
     metadata_path = input_dir / metadata_filename
     metadata = {}
-    original_points = []
+    all_reference_points = []
     
     try:
         with open(metadata_path, "r") as f:
             metadata = json.load(f)
-            original_points = metadata.get("points_data", [])
+            all_reference_points.extend(metadata.get("points_data", []))
+            all_reference_points.extend(metadata.get("additional_points", []))
+            
     except FileNotFoundError:
-        print(f"Warning: {metadata_filename} not found. A new one will be created.")
+        print(f"Warning: {metadata_filename} not found.")
 
     # Load other bands
     for band in required_bands:
@@ -358,7 +397,7 @@ def predict_using_cyfi_pipeline(input_folder_path,
     
     initial_samples = len(target_rows)
     print(f"Identified {initial_samples} potential water points.")
-    if initial_samples == 0: return
+    if initial_samples == 0: return (False, "")
 
     # 4. Create Mock Cache Structure
     temp_cache = Path(tempfile.mkdtemp(prefix="cyfi_lattice_"))
@@ -390,7 +429,6 @@ def predict_using_cyfi_pipeline(input_folder_path,
         if (r_max - r_min) == 0 or (c_max - c_min) == 0:
             continue
 
-        # Cloud Check
         scl_window = data_store["SCL"][r_min:r_max, c_min:c_max]
         cloud_pixel_count = ((scl_window >= 7) & (scl_window <= 10)).sum()
         total_pixels = scl_window.size
@@ -400,7 +438,6 @@ def predict_using_cyfi_pipeline(input_folder_path,
             skipped_clouds += 1
             continue
 
-        # Save Valid Point
         item_dir = cache_subdir / s_id / fake_item_id
         item_dir.mkdir(parents=True, exist_ok=True)
         
@@ -426,7 +463,7 @@ def predict_using_cyfi_pipeline(input_folder_path,
     if len(valid_sample_ids) == 0:
         print("No valid points remained after cloud filtering.")
         shutil.rmtree(temp_cache)
-        return
+        return (False, "")
 
     # 6. Prepare DataFrames for CyFi
     samples_df = pd.DataFrame({
@@ -456,11 +493,10 @@ def predict_using_cyfi_pipeline(input_folder_path,
     except Exception as e:
         print(f"Feature generation failed: {e}")
         shutil.rmtree(temp_cache)
-        return
+        return (False, "")
 
     # 8. Run CyFi Prediction
     print("Running Prediction...")
-    
     pipeline = CyFiPipeline.from_disk(DEFAULT_MODEL_PATH)
     pipeline.predict_features = features_df
     pipeline.predict_samples = samples_df
@@ -470,23 +506,18 @@ def predict_using_cyfi_pipeline(input_folder_path,
     results_df["pixel_row"] = valid_rows
     results_df["pixel_col"] = valid_cols
     
-    # Save CSV
     csv_path = input_dir / "cyfi_lattice_predictions.csv"
     results_df.to_csv(csv_path, index=False)
     print(f"Predictions saved to {csv_path}")
 
     # --- UPDATE METADATA JSON ---
-    # Ensure severity is string to handle potential nans or categories
     severity_list = results_df.severity.astype(str).str.lower().to_list()
     
+    # [FIX] Define these variables explicitly!
     count_high = severity_list.count("high")
     count_moderate = severity_list.count("moderate")
     count_low = severity_list.count("low")
 
-    print("High counts : ", count_high)
-    print("Moderate counts : ", count_moderate)
-    print("Low counts : ", count_low)
-    
     metadata["High counts"] = count_high
     metadata["Moderate counts "] = count_moderate
     metadata["Low counts "] = count_low
@@ -499,41 +530,56 @@ def predict_using_cyfi_pipeline(input_folder_path,
     # ---------------------------------------------------------
     print("Generating Visualization...")
     try:
-        # Load background
         raw_vis_path = input_dir / "visual_raw.tif"
         if raw_vis_path.exists():
             raw_vis = rioxarray.open_rasterio(raw_vis_path).squeeze()
             bg_img = np.moveaxis(raw_vis.values, 0, -1)
             
-            # Robust normalization
             vmin, vmax = np.nanpercentile(bg_img, [2, 98])
             bg_img = np.clip((bg_img - vmin) / (vmax - vmin), 0, 1)
 
             fig, ax = plt.subplots(figsize=(12, 12))
             ax.imshow(bg_img)
             
+            # 1. PREDICTIONS (Dots)
+            severity_colors_pred = {
+                'low': 'green', 'moderate': 'orange', 'high': 'red',
+                '1': 'green', '2': 'orange', '3': 'red',
+                1: 'green', 2: 'orange', 3: 'red'
+            }
             results_df['severity'] = results_df['severity'].astype(str)
+            colors_pred = results_df['severity'].map(lambda x: severity_colors_pred.get(x.lower(), 'gray'))
             
-            # Color Mapping
-            severity_colors = {'low': 'green', 'moderate': 'orange', 'high': 'red'}
-            colors = results_df['severity'].map(severity_colors).fillna('gray')
-            
-            # 1. Overlay PREDICTION POINTS (Lattice)
             ax.scatter(results_df['pixel_col'], results_df['pixel_row'], 
-                       c=colors, s=20, alpha=0.9, edgecolors='black', linewidth=0.5, label='Prediction')
+                       c=colors_pred, s=20, alpha=0.9, edgecolors='black', linewidth=0.5, label='Prediction')
             
-            # 2. Overlay ORIGINAL REFERENCE POINTS (Red X)
-            if original_points:
-                orig_lats = [p['lat'] for p in original_points]
-                orig_lons = [p['lon'] for p in original_points]
+            # 2. REFERENCE POINTS (X)
+            if all_reference_points:
+                ref_lats = [p['lat'] for p in all_reference_points]
+                ref_lons = [p['lon'] for p in all_reference_points]
                 
+                ref_colors = []
+                for p in all_reference_points:
+                    sev = p.get('severity', 3)
+                    try:
+                        val = int(sev)
+                        if val == 1: ref_colors.append('green')
+                        elif val == 2: ref_colors.append('orange')
+                        elif val == 3: ref_colors.append('red')
+                        else: ref_colors.append('red')
+                    except:
+                        s = str(sev).lower()
+                        if 'low' in s: ref_colors.append('green')
+                        elif 'mod' in s: ref_colors.append('orange')
+                        elif 'high' in s: ref_colors.append('red')
+                        else: ref_colors.append('red')
+
                 transformer_inv = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
-                ox, oy = transformer_inv.transform(orig_lons, orig_lats)
+                ox, oy = transformer_inv.transform(ref_lons, ref_lats)
                 orows, ocols = rowcol(transform, ox, oy)
                 
-                ax.scatter(ocols, orows, c='red', s=150, marker='x', linewidths=3, label='Reference Point')
+                ax.scatter(ocols, orows, c=ref_colors, s=150, marker='x', linewidths=3, label='Reference Point')
 
-            # Legend
             legend_elements = [
                 Line2D([0], [0], marker='o', color='w', markerfacecolor='green', label='Low', markersize=8),
                 Line2D([0], [0], marker='o', color='w', markerfacecolor='orange', label='Moderate', markersize=8),
@@ -561,21 +607,20 @@ def predict_using_cyfi_pipeline(input_folder_path,
     print("Cleaning up temporary cache...")
     shutil.rmtree(temp_cache)
     
-    # 10. Rename Folder (Done LAST to ensure safety)
-    # ---------------------------------------------------------
+    # 10. Rename Folder
     try:
         new_folder_name = f"{input_dir.name}_H{count_high}_M{count_moderate}_L{count_low}"
-        new_folder_path = input_dir.parent / new_folder_name
-        
-        # Rename
-        input_dir.rename(new_folder_path)
-        print(f"Successfully renamed folder to: {new_folder_path}")
-        print("Done!")
-        return (True, new_folder_path)
+        if not input_dir.name.endswith(f"_H{count_high}_M{count_moderate}_L{count_low}"):
+            new_folder_path = input_dir.parent / new_folder_name
+            input_dir.rename(new_folder_path)
+            print(f"Successfully renamed folder to: {new_folder_path}")
+            return (True, new_folder_path)
+        return (True, input_dir)
         
     except Exception as e:
         print(f"Could not rename folder: {e}")
-        return (False, "")
+        # Even if rename fails, return True for folder_ok but empty string for new path
+        return (True, str(input_dir))
 
 def compress_image_to_bytes(image_path, target_img_size = (200,200)):
     """
@@ -597,13 +642,15 @@ def compress_image_to_bytes(image_path, target_img_size = (200,200)):
     except Exception as e:
         return None, 0, 0
 
-def update_excel_report(folder_path, excel_path="Master_Report.xlsx"):
+def update_excel_report(folder_path, excel_path="Master_Report.xlsx", uids_tracker_path="uids_processes.xlsx"):
     folder = Path(folder_path).resolve()
     excel_file = Path(excel_path).resolve()
+    uids_file = Path(uids_tracker_path).resolve()
     
-    print(f"--- Updating Report (Rebuild Strategy): {excel_file} ---")
+    print(f"--- Updating Report & UID Tracker ---")
+    print(f"Source: {folder}")
 
-    # 1. Load Metadata for the NEW Entry
+    # 1. Load Metadata
     try:
         with open(folder / "metadata.json", "r") as f:
             meta = json.load(f)
@@ -611,26 +658,86 @@ def update_excel_report(folder_path, excel_path="Master_Report.xlsx"):
         print(f"Error: metadata.json not found in {folder}")
         return
 
-    # 2. Prepare the NEW Row Data
-    # CRITICAL: We save 'source_path' so we can rebuild the image later
+    # =========================================================
+    # PART A: UPDATE UID TRACKER (uids_processes.xlsx)
+    # =========================================================
+    print(f"--- Updating UID Tracker: {uids_file} ---")
+    
+    # 1. Collect UIDs from current metadata
+    current_uids = set()
+    
+    # From points_data (The main points processed)
+    points_data = meta.get("points_data", [])
+    if points_data:
+        for p in points_data:
+            if "uid" in p:
+                current_uids.add(str(p["uid"])) # Convert to string for consistent comparison
+
+    # From additional_points (The newly found points)
+    additional_points = meta.get("additional_points", [])
+    if additional_points:
+        for p in additional_points:
+            if "uid" in p:
+                current_uids.add(str(p["uid"]))
+    
+    if current_uids:
+        # 2. Load existing tracker or create new
+        if uids_file.exists():
+            try:
+                df_uids = pd.read_excel(uids_file)
+                # Ensure we treat existing UIDs as strings for comparison
+                existing_uids = set(df_uids['uid'].astype(str))
+            except Exception as e:
+                print(f"Warning: Could not read {uids_file}, creating new. Error: {e}")
+                df_uids = pd.DataFrame(columns=['uid'])
+                existing_uids = set()
+        else:
+            df_uids = pd.DataFrame(columns=['uid'])
+            existing_uids = set()
+
+        # 3. Filter for NEW UIDs only (Avoid Duplicates)
+        new_uids_list = [uid for uid in current_uids if uid not in existing_uids]
+        
+        # 4. Append and Save
+        if new_uids_list:
+            print(f"Adding {len(new_uids_list)} new UIDs to tracker.")
+            new_df = pd.DataFrame({'uid': new_uids_list})
+            
+            # Concat and save
+            df_final = pd.concat([df_uids, new_df], ignore_index=True)
+            df_final.to_excel(uids_file, index=False)
+            print(f"Saved updated UIDs to {uids_file}")
+        else:
+            print("No new UIDs to add (all already exist in tracker).")
+    else:
+        print("No UIDs found in metadata to track.")
+
+
+    # =========================================================
+    # PART B: UPDATE MASTER REPORT (Images in Cells)
+    # =========================================================
+    print(f"--- Updating Master Report (Rebuild Strategy): {excel_file} ---")
+
+    # 1. Prepare the NEW Row Data
     new_row = {
         "uid": meta.get("uid", "N/A"),
-        "case":int(folder_path.split("_")[0][4:]),
+        "case": int(folder.name.split("_")[0][4:]) if folder.name.startswith("case") else "N/A",
         "item_id": meta.get("item_id", "N/A"),
         "date": meta.get("date", "N/A"),
         "lat": meta.get("center_lat", "N/A"),
         "lon": meta.get("center_lon", "N/A"),
         "abun": meta.get("abun", "N/A"),
+        "per_clouds": meta.get("per_clouds", "N/A"),
         "high_pred": meta.get("High counts", -1),
         "mod_pred": meta.get("Moderate counts ", -1),
         "low_pred": meta.get("Low counts ", -1),
         "NDVI": "", 
         "NCVI": "",
         "pred_vislual": "",
-        "source_path": str(folder) # <--- The Key: Remember where the images are!
+        "source_path": str(folder)
     }
     
-    # 3. Combine Old and New Text Data
+    # 2. Combine Old and New Text Data
     if excel_file.exists():
         df = pd.read_excel(excel_file)
         # Ensure source_path column exists
@@ -641,64 +748,68 @@ def update_excel_report(folder_path, excel_path="Master_Report.xlsx"):
     else:
         df = pd.DataFrame([new_row])
 
-    # 4. REBUILD THE FILE (XlsxWriter)
-    # This is the only engine that supports 'embed_image' (Place in Cell)
-    with pd.ExcelWriter(excel_file, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Report')
-        
-        workbook = writer.book
-        worksheet = writer.sheets['Report']
-        
-        # Formatting
-        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D3D3D3', 'border': 1})
-        for col_num, value in enumerate(df.columns.values):
-            worksheet.write(0, col_num, value, header_fmt)
+    # 3. REBUILD THE FILE (XlsxWriter)
+    try:
+        with pd.ExcelWriter(excel_file, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Report')
+            
+            workbook = writer.book
+            worksheet = writer.sheets['Report']
+            
+            # Formatting
+            header_fmt = workbook.add_format({'bold': True, 'bg_color': '#D3D3D3', 'border': 1})
+            for col_num, value in enumerate(df.columns.values):
+                worksheet.write(0, col_num, value, header_fmt)
 
-        # 5. RE-INSERT IMAGES FOR EVERY ROW
-        image_map = {
-            "NDVI": "NDVI_preview.png",
-            "NCVI": "NDCI_preview.png",
-            "pred_vislual": "cyfi_prediction_map.png"
-        }
-        
-        columns_list = list(df.columns)
-        
-        # Loop through every row in the report
-        for index, row in df.iterrows():
-            excel_row_idx = index + 1 # +1 for header
+            # 4. RE-INSERT IMAGES FOR EVERY ROW
+            image_map = {
+                "NDVI": "NDVI_preview.png",
+                "NCVI": "NDCI_preview.png",
+                "pred_vislual": "cyfi_prediction_map.png"
+            }
             
-            # Retrieve the folder path for THIS row
-            row_folder_str = row.get('source_path')
+            columns_list = list(df.columns)
             
-            if not row_folder_str or pd.isna(row_folder_str):
-                continue
+            # Loop through every row in the report
+            for index, row in df.iterrows():
+                excel_row_idx = index + 1 # +1 for header
                 
-            row_path = Path(row_folder_str)
-            
-            # Set Row Height
-            worksheet.set_row_pixels(excel_row_idx, 150)
-
-            # Insert Images
-            for col_name, filename in image_map.items():
-                if col_name in columns_list:
-                    col_idx = columns_list.index(col_name)
-                    img_path = row_path / filename
+                # Retrieve the folder path for THIS row
+                row_folder_str = row.get('source_path')
+                
+                if not row_folder_str or pd.isna(row_folder_str):
+                    continue
                     
-                    if img_path.exists():
-                        img_data, width, height = compress_image_to_bytes(img_path, (200, 200))
+                row_path = Path(row_folder_str)
+                
+                # Set Row Height
+                worksheet.set_row_pixels(excel_row_idx, 150)
+
+                # Insert Images
+                for col_name, filename in image_map.items():
+                    if col_name in columns_list:
+                        col_idx = columns_list.index(col_name)
+                        img_path = row_path / filename
                         
-                        if img_data:
-                            # embed_image = "Place in Cell"
-                            worksheet.embed_image(excel_row_idx, col_idx, filename, {
-                                'image_data': img_data,
-                                'object_position': 1 # Move and size with cells
-                            })
+                        if img_path.exists():
+                            img_data, width, height = compress_image_to_bytes(img_path, (200, 200))
                             
-                            # Set column width
-                            worksheet.set_column_pixels(col_idx, col_idx, width + 10)
+                            if img_data:
+                                # embed_image = "Place in Cell"
+                                worksheet.embed_image(excel_row_idx, col_idx, filename, {
+                                    'image_data': img_data,
+                                    'object_position': 1 # Move and size with cells
+                                })
+                                
+                                # Set column width
+                                worksheet.set_column_pixels(col_idx, col_idx, width + 10)
 
-    print(f"Report Rebuilt Successfully: {excel_file}")
-
+        print(f"Report Rebuilt Successfully: {excel_file}")
+    except PermissionError:
+        print(f"Error: Could not write to {excel_file}. Please close the file if it is open.")
+    except Exception as e:
+        print(f"An error occurred while writing the report: {e}")
+        
 def find_satelite_images(p_lat, p_lon, sel_date, meter_buffer = 3000):
     catalog = Client.open(
     "https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace
@@ -799,7 +910,7 @@ def select_item(item_details):
         return False, None
     
     low_clouds["abs_date_difference"] = np.abs(low_clouds["date_difference"])
-    if len(low_clouds) == 0:
+    if len(low_clouds) == 1:
         return low_clouds.iloc[0], True
     
     low_clouds.sort_values(by = "per_clouds", inplace = True)
@@ -810,7 +921,7 @@ def select_item(item_details):
         sel_items = low_clouds[low_clouds["per_clouds"] < 5.0].copy()
         sel_items.sort_values(by = "abs_date_difference", inplace = True)
     else:
-        sel_items = low_clouds[low_clouds["per_clouds"] < 5.0].copy()
+        sel_items = low_clouds.copy()
         sel_items.sort_values(by = "abs_date_difference", inplace = True)
         
     return sel_items.iloc[0], True
