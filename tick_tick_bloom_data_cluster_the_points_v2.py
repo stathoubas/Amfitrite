@@ -154,8 +154,137 @@ def perform_clustering_with_size(df: pd.DataFrame, time_window_days: int, max_di
     
 
     return df_proc
+
+
+
+def perform_spatial_clustering_improved(df: pd.DataFrame, edge_length_meters: float) -> pd.DataFrame:
+    """
+    Performs spatial clustering based on a square window approach with barycenter refinement.
+    
+    Args:
+        df (pd.DataFrame): Input dataframe with 'lat' and 'lon' columns.
+        edge_length_meters (float): The edge length of the square window in meters.
+        
+    Returns:
+        pd.DataFrame: A copy of the input dataframe with 'case' and 'cluster_size' columns added.
+    """
+    print("Preparing data for spatial clustering...")
+    df_proc = df.copy()
+    
+    if not pd.api.types.is_datetime64_any_dtype(df_proc['date']):
+        try:
+            df_proc['date'] = pd.to_datetime(df_proc['date'], format='%Y%m%d')
+        except ValueError:
+            print("Could not parse 'date' column with format YYYYMMDD. Please ensure it's in this format.")
+            return df
+    
+    # Initialize columns
+    df_proc['case'] = pd.NA
+    df_proc['case'] = df_proc['case'].astype('Int64')
+    df_proc['cluster_size'] = pd.NA
+    df_proc['cluster_size'] = df_proc['cluster_size'].astype('Int64')
+    
+    # Constants for conversion
+    # Approx meters per degree latitude
+    METERS_PER_DEG_LAT = 111132.0
+    
+    case_counter = 1
+    
+    # Helper function to find points within the square window
+    def get_points_in_square(c_lat, c_lon, available_indices):
+        # Calculate half-edge in degrees
+        # Latitude delta is constant
+        d_lat = (edge_length_meters / 2) / METERS_PER_DEG_LAT
+        
+        # Longitude delta depends on latitude (use center latitude)
+        # We use abs(lat) and convert to radians for cosine
+        d_lon = (edge_length_meters / 2) / (METERS_PER_DEG_LAT * np.cos(np.radians(c_lat)))
+        
+        min_lat, max_lat = c_lat - d_lat, c_lat + d_lat
+        min_lon, max_lon = c_lon - d_lon, c_lon + d_lon
+        
+        # Filter the subset of unassigned points
+        subset = df_proc.loc[available_indices]
+        mask = (
+            (subset['lat'] >= min_lat) & (subset['lat'] <= max_lat) &
+            (subset['lon'] >= min_lon) & (subset['lon'] <= max_lon)
+        )
+        return subset[mask].index.tolist()
+
+    # Iterate through every point in the dataframe
+    # We iterate over the index to handle non-standard indices correctly
+    all_indices = df_proc.index.tolist()
+   
+    counter = 0
+    t0 = time()
+    for i in all_indices:     
+        counter += 1
+        if counter/250 in [i for i in range(100)]:
+            t1 = time()
+            print(counter, "in ", round((t1-t0), 1), "s")
+            t0 = t1
+        
+        # Step 6: Continue to next point but only process if not yet selected in a cluster
+        if not pd.isna(df_proc.at[i, 'case']):
+            continue
+            
+        # ---------------------------------------------------------
+        # Step 1: Find points in a square centered at the point
+        # ---------------------------------------------------------
+        current_lat = df_proc.at[i, 'lat']
+        current_lon = df_proc.at[i, 'lon']
+        
+        # We only search among points that have NO case assigned yet
+        unassigned_indices = df_proc.index[df_proc['case'].isna()].tolist()
+        
+        candidates_1 = get_points_in_square(current_lat, current_lon, unassigned_indices)
+        
+        if not candidates_1:
+            continue
+
+        # ---------------------------------------------------------
+        # Step 2: Find barycenter and repeat
+        # ---------------------------------------------------------
+        subset_1 = df_proc.loc[candidates_1]
+        bary_lat_1 = subset_1['lat'].mean()
+        bary_lon_1 = subset_1['lon'].mean()
+        
+        # Search again centered at the barycenter
+        candidates_2 = get_points_in_square(bary_lat_1, bary_lon_1, unassigned_indices)
+        
+        # ---------------------------------------------------------
+        # Step 3: Check for changes and do a 3rd time if needed
+        # ---------------------------------------------------------
+        final_candidates = candidates_2
+        
+        # Compare sets of indices
+        if set(candidates_1) != set(candidates_2):
+            if candidates_2: # Ensure we didn't drift into empty space
+                subset_2 = df_proc.loc[candidates_2]
+                bary_lat_2 = subset_2['lat'].mean()
+                bary_lon_2 = subset_2['lon'].mean()
                 
-                
+                candidates_3 = get_points_in_square(bary_lat_2, bary_lon_2, unassigned_indices)
+                final_candidates = candidates_3
+        
+        # ---------------------------------------------------------
+        # Step 4: Assign ascending number (case)
+        # ---------------------------------------------------------
+        if final_candidates:
+            df_proc.loc[final_candidates, 'case'] = case_counter
+            case_counter += 1
+
+    # ---------------------------------------------------------
+    # Step 5: Count points and assign cluster_size
+    # ---------------------------------------------------------
+    # Value counts gives size of each case
+    cluster_counts = df_proc['case'].value_counts()
+    
+    # Map the counts back to the dataframe
+    df_proc['cluster_size'] = df_proc['case'].map(cluster_counts)
+    
+    print(f"Clustering complete. Found {case_counter - 1} clusters.")
+    return df_proc      
 
 
 
@@ -166,6 +295,9 @@ df = pd.read_csv(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - 
 #df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\junk4.xlsx", index = False)
         
     
-df_out = perform_clustering_with_size(df, 15, 2560)
-df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\clustered_data_15days_2560m.xlsx", index = False)
-    
+#df_out = perform_clustering_with_size(df, 15, 2560)
+#df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\clustered_data_15days_2560m.xlsx", index = False)
+ 
+
+df_out = perform_spatial_clustering_improved(df, 2560) 
+df_out.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\tick tick bloom data\clustered_only_square_2560m.xlsx", index = False)

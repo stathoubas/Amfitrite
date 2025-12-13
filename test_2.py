@@ -41,9 +41,12 @@ low_sev_cases = list(dict.fromkeys(low_sev.case.to_list()))
 
 for iii, sel_case in enumerate(low_sev_cases[:100]):
     
+    print("----------> HELLO ", iii, sel_case)
+    
     #points_df = low_sev[low_sev.case == sel_case].copy()
     points_df = after2017_near_water[after2017_near_water.case == sel_case].copy()
     if 2 in points_df.severity.to_list() or 3 in points_df.severity.to_list() or 4 in points_df.severity.to_list() or 5 in points_df.severity.to_list():
+        print("----------> Not pure in severities ", iii, sel_case)
         continue
     
     if os.path.exists(uids_processed_path):
@@ -69,6 +72,7 @@ for iii, sel_case in enumerate(low_sev_cases[:100]):
     item = None
     
     for date in dates:
+        print("----------> date is ", date)
         item_details = find_satelite_images(points_df["lat"].mean(), points_df["lon"].mean(), date)
         if item_details.empty:
             continue
@@ -79,6 +83,7 @@ for iii, sel_case in enumerate(low_sev_cases[:100]):
             
     if found:
         final_date = item.datetime
+        print("----------> Found  item!!!  with date = ", final_date)
         pixel_size = 365
         
         out_folder = os.path.join(sat_test_folder, f"case{sel_case}_abun{abun}_{pixel_size}_date{final_date}")
@@ -87,8 +92,12 @@ for iii, sel_case in enumerate(low_sev_cases[:100]):
         extract_and_save_tile(item.item_obj, points_df, after2017_near_water, initial_pixel_size=pixel_size,
             save_data=True, output_path=out_folder, print_images=False)
         
+        print("----------> Finished extract and save")
+        
         # run cyfi pipeline
         folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
+        
+        print("----------> Finished cyfi")
         
         if folder_ok:
             summary_file_path_name = os.path.join(sat_test_folder, "Master_Report.xlsx")
@@ -96,33 +105,39 @@ for iii, sel_case in enumerate(low_sev_cases[:100]):
             
             # updates the report and adds the UIDs to uids_processed.xlsx
             update_excel_report(new_path, excel_path=summary_file_path_name, uids_tracker_path=processed_uids_path_name)
+            print("----------> Excel report updated")
         else:
             #Log "cyfi failed"
+            print("----------> cyfi failed")
             log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
 
     else:
         # Log "no suitable item"
+        print("----------> no suitable item")
         log_problem_uids(points_df, "no suitable item", problematic_uids_path)
         
         
 high_sev = after2017_near_water[(after2017_near_water.severity >= 3)]
-high_sev.sort_values(by = "abun", reverse = True, inplace = True)
+high_sev.sort_values(by = "abun", ascending = False, inplace = True)
 high_sev_cases = list(dict.fromkeys(high_sev.case.to_list()))
 
-for iii, sel_case in enumerate(high_sev[:100]):
-
+for iii, sel_case in enumerate(high_sev_cases[:100]):
+    
+    print("----------> HELLO High Sev", iii, sel_case)
+    
     #points_df = low_sev[low_sev.case == sel_case].copy()
     points_df = after2017_near_water[after2017_near_water.case == sel_case].copy()
-    if 2 in points_df.severity.to_list() or 3 in points_df.severity.to_list() or 4 in points_df.severity.to_list() or 5 in points_df.severity.to_list():
+    if 1 in points_df.severity.to_list() or 2 in points_df.severity.to_list():
+        print("----------> Not pure in severities ", iii, sel_case)
         continue
-
+    
     if os.path.exists(uids_processed_path):
         try:
             processed_df = pd.read_excel(uids_processed_path)
             if not processed_df.empty:
                 # Convert to string to ensure matching types
                 processed_uids = processed_df['uid'].astype(str).unique()
-
+                
                 # Keep only UIDs that are NOT in the processed list
                 points_df = points_df[~points_df['uid'].astype(str).isin(processed_uids)]
         except Exception as e:
@@ -137,39 +152,49 @@ for iii, sel_case in enumerate(high_sev[:100]):
     dates = [i.strftime('%Y-%m-%d') for i in points_df["date"].value_counts().index.to_list()]
     found = False
     item = None
-
+    
     for date in dates:
+        print("----------> date is ", date)
         item_details = find_satelite_images(points_df["lat"].mean(), points_df["lon"].mean(), date)
         if item_details.empty:
             continue
-
+            
         item, found = select_item(item_details)
         if found:
             break
-
+            
     if found:
         final_date = item.datetime
+        print("----------> Found  item!!!  with date = ", final_date)
         pixel_size = 365
-
+        
         out_folder = os.path.join(sat_test_folder, f"case{sel_case}_abun{abun}_{pixel_size}_date{final_date}")
-
+        
         # extract tile
         extract_and_save_tile(item.item_obj, points_df, after2017_near_water, initial_pixel_size=pixel_size,
             save_data=True, output_path=out_folder, print_images=False)
-
+        
+        print("----------> Finished extract and save")
+        
         # run cyfi pipeline
         folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
-
+        
+        print("----------> Finished cyfi")
+        
         if folder_ok:
             summary_file_path_name = os.path.join(sat_test_folder, "Master_Report.xlsx")
             processed_uids_path_name = uids_processed_path
-
+            
             # updates the report and adds the UIDs to uids_processed.xlsx
             update_excel_report(new_path, excel_path=summary_file_path_name, uids_tracker_path=processed_uids_path_name)
+            print("----------> Excel report updated")
         else:
             #Log "cyfi failed"
+            print("----------> cyfi failed")
             log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
 
     else:
         # Log "no suitable item"
+        print("----------> no suitable item")
         log_problem_uids(points_df, "no suitable item", problematic_uids_path)
+        
