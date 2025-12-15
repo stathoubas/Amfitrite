@@ -7,6 +7,8 @@ Created on Fri Dec 12 11:53:15 2025
 import pandas as pd
 import numpy as np
 import os
+import time
+import random
 from datetime import timedelta
 from pystac_client import Client
 import planetary_computer as pc
@@ -65,6 +67,29 @@ def merge_time_windows(date_list, buffer_days=15):
     merged.append((curr_start, curr_end))
     return merged
 
+def search_with_retry(search_obj, max_retries=5):
+    """
+    Executes search.item_collection() with retries to handle API timeouts.
+    """
+    for attempt in range(max_retries):
+        try:
+            # item_collection() is the modern replacement for get_all_items()
+            return search_obj.item_collection()
+        except Exception as e:
+            error_msg = str(e)
+            # Check for timeout or server availability errors
+            # "maximum allowed time" is the specific error you saw
+            if "maximum allowed time" in error_msg or "504" in error_msg or "503" in error_msg:
+                wait_time = (2 ** attempt) + (random.random() * 2)
+                print(f"   >>> API Timeout/Error. Retrying in {wait_time:.2f}s (Attempt {attempt + 1}/{max_retries})...")
+                time.sleep(wait_time)
+            else:
+                # If it's a logic error (not network/timeout), raise immediately
+                raise e
+                
+    print(f"   >>> Failed after {max_retries} retries. Skipping this interval.")
+    return []
+
 def search_optimized_windows(lat, lon, date_list):
     """
     Searches Planetary Computer using merged time windows to avoid 
@@ -87,7 +112,10 @@ def search_optimized_windows(lat, lon, date_list):
         print(f"   > Searching interval: {date_range_str}")
         search = catalog.search(collections=["sentinel-2-l2a"], bbox=bbox, datetime=date_range_str)
         
-        for item in search.get_all_items():
+        # --- RETRY LOGIC HERE ---
+        items = search_with_retry(search)
+        
+        for item in items:
             if item.id not in seen_ids:
                 all_items.append(item)
                 seen_ids.add(item.id)
@@ -132,6 +160,8 @@ problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids.csv")
 
 os.makedirs(sat_test_folder, exist_ok=True)
 
+skip_problematic_ids = True
+
 # --- MAIN EXECUTION ---
 df = pd.read_excel(os.path.join(root_folder, "tick tick bloom data", "clustered_only_square_2560m.xlsx"))
 after2017 = df[(df.date >= "2017-01-01")]
@@ -146,32 +176,49 @@ for iii, sel_case in enumerate(low_sev_cases):
     
     case_df = after2017_near_water[after2017_near_water.case == sel_case].copy()
     
-    # Filter processed UIDs
+    # --- 1. Filter Processed UIDs (Successes) ---
     if os.path.exists(uids_processed_path):
         try:
             processed_df = pd.read_excel(uids_processed_path)
             if not processed_df.empty:
                 processed_uids = processed_df['uid'].astype(str).unique()
                 case_df = case_df[~case_df['uid'].astype(str).isin(processed_uids)]
-        except: pass
+        except Exception as e:
+            print(f"Warning reading processed UIDs: {e}")
+
+    # --- 2. Filter Problematic UIDs (Failures/Skips) ---
+    if skip_problematic_ids:
+        try:
+            # Check if file is empty
+            if os.path.getsize(problematic_uids_path) > 0:
+                prob_df = pd.read_csv(problematic_uids_path)
+                if not prob_df.empty and 'uid' in prob_df.columns:
+                    prob_uids = prob_df['uid'].astype(str).unique()
+                    before_count = len(case_df)
+                    case_df = case_df[~case_df['uid'].astype(str).isin(prob_uids)]
+                    after_count = len(case_df)
+                    if before_count > after_count:
+                        print(f"   > Skipped {before_count - after_count} previously problematic UIDs.")
+        except Exception as e:
+            print(f"Warning reading problematic UIDs: {e}")
 
     if case_df.empty:
-        print("----------> Skipping case (all UIDs processed).")
+        print("----------> Skipping case (all UIDs processed or problematic).")
         continue
 
-    # 1. Create sub-clusters based on date
+    # 3. Create sub-clusters based on date
     case_df['date_str'] = pd.to_datetime(case_df['date']).dt.strftime('%Y-%m-%d')
     unique_dates = sorted(case_df['date_str'].unique())
     print(f"----------> Unique dates in case: {unique_dates}")
     
-    # 2. Search PC with OPTIMIZED windows
+    # 4. Search PC with OPTIMIZED windows (and Retry Logic)
     all_items_df = search_optimized_windows(case_df['lat'].mean(), case_df['lon'].mean(), unique_dates)
     
     if all_items_df.empty:
         log_problem_uids(case_df, "no suitable item", problematic_uids_path)
         continue
 
-    # 3. Assign items to nearest dates
+    # 5. Assign items to nearest dates
     date_candidates = {}
     
     for target_date in unique_dates:
@@ -185,7 +232,7 @@ for iii, sel_case in enumerate(low_sev_cases):
         candidates = all_items_df[all_items_df['diff'] <= 15].copy()
         date_candidates[target_date] = candidates
 
-    #Select Optimal Items & Handle Merging
+    # Select Optimal Items & Handle Merging
     selected_item_map = {} 
     
     for date, candidates in date_candidates.items():
