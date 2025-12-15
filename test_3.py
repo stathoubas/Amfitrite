@@ -11,7 +11,7 @@ from datetime import timedelta
 from pystac_client import Client
 import planetary_computer as pc
 import rioxarray
-from utils_v3 import update_excel_report, predict_using_cyfi_pipeline, extract_and_save_tile, select_item, get_bounding_box
+from utils_v4 import update_excel_report, predict_using_cyfi_pipeline, extract_and_save_tile, select_item, get_bounding_box
 
 
 def log_problem_uids(df, reason, file_path):
@@ -126,7 +126,7 @@ def search_optimized_windows(lat, lon, date_list):
 
 # --- CONFIGURATION ---
 root_folder = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD"
-sat_test_folder = os.path.join(root_folder, "sat data test", "v4")
+sat_test_folder = os.path.join(root_folder, "sat data test", "v1")
 uids_processed_path = os.path.join(sat_test_folder, "uids_processed.xlsx")
 problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids.csv")
 
@@ -141,7 +141,7 @@ low_sev.sort_values(by = "abun", inplace = True)
 
 low_sev_cases = list(dict.fromkeys(low_sev.case.to_list()))
 
-for iii, sel_case in enumerate(low_sev_cases[:100]):
+for iii, sel_case in enumerate(low_sev_cases):
     print(f"----------> PROCESSING CASE {iii}: {sel_case}")
     
     case_df = after2017_near_water[after2017_near_water.case == sel_case].copy()
