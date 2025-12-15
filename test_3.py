@@ -156,13 +156,13 @@ for iii, sel_case in enumerate(low_sev_cases):
         except: pass
 
     if case_df.empty:
-        print("Skipping case (all UIDs processed).")
+        print("----------> Skipping case (all UIDs processed).")
         continue
 
     # 1. Create sub-clusters based on date
     case_df['date_str'] = pd.to_datetime(case_df['date']).dt.strftime('%Y-%m-%d')
     unique_dates = sorted(case_df['date_str'].unique())
-    print(f"Unique dates in case: {unique_dates}")
+    print(f"----------> Unique dates in case: {unique_dates}")
     
     # 2. Search PC with OPTIMIZED windows
     all_items_df = search_optimized_windows(case_df['lat'].mean(), case_df['lon'].mean(), unique_dates)
@@ -224,7 +224,7 @@ for iii, sel_case in enumerate(low_sev_cases):
         dates_in_group = group['dates']
         item_row = group['item']
         
-        print(f"Processing Item {item_id} for dates: {dates_in_group}")
+        print(f"----------> Processing Item {item_id} for dates: {dates_in_group}")
         
         # a) Define points_df (merged rows for all dates in this group)
         points_df = case_df[case_df['date_str'].isin(dates_in_group)].copy()
@@ -254,9 +254,9 @@ for iii, sel_case in enumerate(low_sev_cases):
             processed_uids_path_name = uids_processed_path
             
             update_excel_report(new_path, excel_path=summary_file_path_name, uids_tracker_path=processed_uids_path_name)
-            print("Report Updated.")
+            print("----------> Report Updated.")
         else:
-            print("CyFi Failed.")
+            print("----------> CyFi Failed.")
             log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
 
-print("Batch processing complete.")
+print("----------> Batch processing complete.")
