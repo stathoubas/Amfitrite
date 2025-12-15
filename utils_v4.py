@@ -11,6 +11,9 @@ differences compared to v3
 3) Only pred_vislual image is kept (NDVI, NCVI were removed) from Master the excel. Also it was renamed to pred_visual.
 4) A second excel named Master_summary.xlsx keeping all the information except of the images was created.
 
+5) fix bug with error rioxarray.exceptions.NoDataInBounds occuring when the bounding box 
+   calculated around the points does not overlap with the actual data in the downloaded 
+   satellite image tile.
 """
 
 import json
@@ -29,6 +32,7 @@ from tqdm import tqdm
 import rasterio
 import rioxarray
 from rasterio.transform import rowcol
+from rioxarray.exceptions import NoDataInBounds
 import geopandas as gpd
 
 from pyproj import CRS, Transformer, Geod
@@ -577,43 +581,49 @@ def extract_and_save_tile(
     clipped_data = {}
     print("--- Clipping and Aligning Rasters ---")
     
-    b04_href = pc.sign(item.assets["B04"].href)
-    b04_ds = rioxarray.open_rasterio(b04_href)
-    b04_clip = b04_ds.rio.clip_box(
-        minx=clip_bbox_utm[0], miny=clip_bbox_utm[1], 
-        maxx=clip_bbox_utm[2], maxy=clip_bbox_utm[3],
-        crs=target_crs
-    )
-    b04_clip = b04_clip.isel(y=slice(0, final_pixel_side), x=slice(0, final_pixel_side))
-    clipped_data["B04"] = b04_clip.squeeze() 
-    
-    for asset_key, gsd in band_gsd_map.items():
-        if asset_key == "B04": continue
-        
-        asset_href = pc.sign(item.assets[asset_key].href)
-        ds = rioxarray.open_rasterio(asset_href)
-        
-        ds_clip = ds.rio.clip_box(
+    try:
+        b04_href = pc.sign(item.assets["B04"].href)
+        b04_ds = rioxarray.open_rasterio(b04_href)
+        b04_clip = b04_ds.rio.clip_box(
             minx=clip_bbox_utm[0], miny=clip_bbox_utm[1], 
             maxx=clip_bbox_utm[2], maxy=clip_bbox_utm[3],
             crs=target_crs
         )
-
-        resampling_method = rasterio.enums.Resampling.nearest if asset_key == "SCL" else rasterio.enums.Resampling.bilinear
-        ds_aligned = ds_clip.rio.reproject_match(b04_clip, resampling=resampling_method)
+        b04_clip = b04_clip.isel(y=slice(0, final_pixel_side), x=slice(0, final_pixel_side))
+        clipped_data["B04"] = b04_clip.squeeze() 
         
-        if asset_key != "visual":
-            clipped_data[asset_key] = ds_aligned.squeeze()
-        else:
-             clipped_data[asset_key] = ds_aligned
+        for asset_key, gsd in band_gsd_map.items():
+            if asset_key == "B04": continue
+            
+            asset_href = pc.sign(item.assets[asset_key].href)
+            ds = rioxarray.open_rasterio(asset_href)
+            
+            ds_clip = ds.rio.clip_box(
+                minx=clip_bbox_utm[0], miny=clip_bbox_utm[1], 
+                maxx=clip_bbox_utm[2], maxy=clip_bbox_utm[3],
+                crs=target_crs
+            )
+
+            resampling_method = rasterio.enums.Resampling.nearest if asset_key == "SCL" else rasterio.enums.Resampling.bilinear
+            ds_aligned = ds_clip.rio.reproject_match(b04_clip, resampling=resampling_method)
+            
+            if asset_key != "visual":
+                clipped_data[asset_key] = ds_aligned.squeeze()
+            else:
+                 clipped_data[asset_key] = ds_aligned
+                 
+    except NoDataInBounds:
+        print(f"Error: The calculated bounding box is outside the bounds of the satellite tile.")
+        print(f"Tile Bounds: {b04_ds.rio.bounds()}")
+        print(f"Requested Box: {clip_bbox_utm}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred during clipping: {e}")
+        return False
     
     # --- CALCULATE CLOUD & WATER STATS FROM SCL ---
-    # SCL Classes: 3 (Cloud Shadows), 6 (Water), 7-10 (Cloud/Cirrus)
     scl_vals = clipped_data["SCL"].values
-    
-    # Clouds (High Prob, Med Prob, Shadows, Cirrus, Unclassified)
     cloud_mask = (scl_vals == 3) | ((scl_vals >= 7) & (scl_vals <= 10))
-    # Water
     water_mask = (scl_vals == 6)
     
     calculated_per_clouds = round((np.sum(cloud_mask) / scl_vals.size) * 100, 2)
@@ -644,7 +654,7 @@ def extract_and_save_tile(
     vis_data["NDVI"] = ndvi
     vis_data["NDCI"] = ndci
 
-    # 7. Prepare Plotting Coordinates (UTM)
+    # 7. Prepare Plotting
     plot_x, plot_y = transformer_latlon_to_utm.transform(points_df.lon.values, points_df.lat.values)
     
     def get_color(sev):
@@ -704,8 +714,8 @@ def extract_and_save_tile(
 
         metadata = {
             "item_id": item.id,
-            "per_clouds": calculated_per_clouds,  # FIXED: Using calculated value
-            "water_pixels": calculated_water_pixels, # ADDED
+            "per_clouds": calculated_per_clouds,
+            "water_pixels": calculated_water_pixels,
             "uid": points_df.iloc[0]["uid"], 
             "abun": max(points_df["abun"].to_list()),
             "tile_size_10m_pixels": final_pixel_side,
@@ -718,7 +728,8 @@ def extract_and_save_tile(
             json.dump(metadata, f, indent=4)
             
         print(f"Data successfully saved to: {output_dir.resolve()}")
-
+        
+    return True # Return Success
 
 def update_excel_report(folder_path, excel_path="Master_Report.xlsx", uids_tracker_path="uids_processes.xlsx"):
     folder = Path(folder_path).resolve()
