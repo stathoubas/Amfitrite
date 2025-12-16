@@ -159,7 +159,7 @@ os.makedirs(sat_test_folder, exist_ok=True)
 df = pd.read_excel(os.path.join(root_folder, "tick tick bloom data", "clustered_only_square_2560m.xlsx"))
 after2017 = df[(df.date >= "2017-01-01")]
 after2017_near_water = after2017[after2017["distance_to_water_m"] <= 10]
-low_sev = after2017_near_water[(after2017_near_water.severity <= 1)]
+low_sev = after2017_near_water[(after2017_near_water.severity <= 1)].copy()
 low_sev.sort_values(by = "abun", inplace = True)
 
 low_sev_cases = list(dict.fromkeys(low_sev.case.to_list()))
