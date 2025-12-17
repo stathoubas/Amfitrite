@@ -5,14 +5,11 @@ Created on Tue Dec 16 10:35:31 2025
 @author: K. Pikounis
 
 based on utils_v4
-Server-ready utilities with File Locking to safely handle 
-concurrent writes to Excel reports from multiple parallel scripts.
-
-
-Modifications:
-1. Fixed JSON serialization error in extract_and_save_tile (handles Timestamps).
-2. Server-ready utilities with File Locking. Merges original CyFi/SCL logic with FileLock mechanisms for safe multi-process reporting.
-
+differences compared to v4
+Master_Report excel is not creates and updated live.
+instead only Master_summary excel is created and updated live and funciton
+Instead build_master_report_from_summary function creates another sheet in summary recreating the report
+(funciton untested)
 """
 
 import json
@@ -777,7 +774,7 @@ def extract_and_save_tile(
         
     return True # Return Success
 
-def acquire_with_retry(lock, retries, sleep_base=0.5):
+def acquire_with_retry(lock, retries, sleep_base=1.5):
     for attempt in range(1, retries + 1):
         if lock.acquire():
             return True
@@ -785,122 +782,64 @@ def acquire_with_retry(lock, retries, sleep_base=0.5):
             time.sleep(sleep_base + random.random())
     return False
 
-def update_excel_report(folder_path, excel_path="Master_Report.xlsx", uids_tracker_path="uids_processes.xlsx", retries=3 ):
-    UID_LOCK_TIMEOUT = 5
-    EXCEL_LOCK_TIMEOUT = 120
+def update_uids_and_summary_locked(folder_path, uids_file, summary_file, retries=3):
+    folder = Path(folder_path)
 
-    folder = Path(folder_path).resolve()
-    excel_file = Path(excel_path).resolve()
-    summary_file = excel_file.parent / "Master_Summary.xlsx"
-    uids_file = Path(uids_tracker_path).resolve()
+    with open(folder / "metadata.json") as f:
+        meta = json.load(f)
 
-    print(f"--- Updating Report & UID Tracker ---")
+    points = meta.get("points_data", [])
+    uids = {str(p["uid"]) for p in points if "uid" in p}
+    abun_list = sorted([p["abun"] for p in points if "abun" in p], reverse=True)
+    abun_list_str = str(abun_list)
 
-    # --------------------------------------------------
-    # 1) Read metadata.json (NO LOCK)
-    # --------------------------------------------------
-    try:
-        with open(folder / "metadata.json", "r") as f:
-            meta = json.load(f)
-    except Exception as e:
-        print(f"Metadata read failed: {e}")
-        return
-
-    # --------------------------------------------------
-    # 2) UID TRACKER (LOCK + RETRY)
-    # --------------------------------------------------
-    points_data = meta.get("points_data", [])
-    current_uids = set()
-    abun_list_raw = []
-
-    for p in points_data:
-        if "uid" in p:
-            current_uids.add(str(p["uid"]))
-        if "abun" in p:
-            abun_list_raw.append(p["abun"])
-
-    abun_list_raw.sort(reverse=True)
-    abun_list_str = str(abun_list_raw)
-
-    uid_lock = SimpleFileLock(uids_file, timeout=UID_LOCK_TIMEOUT)
+    # --- UID FILE ---
+    uid_lock = SimpleFileLock(uids_file, timeout=5)
     if not acquire_with_retry(uid_lock, retries):
-        print("ERROR: UID lock failed after retries")
         return
 
     try:
-        if uids_file.exists():
-            df_uids = pd.read_excel(uids_file)
-            existing_uids = set(df_uids["uid"].astype(str))
+        if Path(uids_file).exists():
+            df_u = pd.read_excel(uids_file)
         else:
-            df_uids = pd.DataFrame(columns=["uid"])
-            existing_uids = set()
+            df_u = pd.DataFrame(columns=["uid"])
 
-        new_uids = [u for u in current_uids if u not in existing_uids]
-        if new_uids:
-            df_uids = pd.concat(
-                [df_uids, pd.DataFrame({"uid": new_uids})],
-                ignore_index=True
-            )
-            df_uids.to_excel(uids_file, index=False)
+        df_u = pd.concat([df_u, pd.DataFrame({"uid": list(uids)})]).drop_duplicates()
+        df_u.to_excel(uids_file, index=False)
     finally:
         uid_lock.release()
 
-    # --------------------------------------------------
-    # 3) MASTER + SUMMARY (LOCK + RETRY)
-    # --------------------------------------------------
-    new_row = {
-        "uid": meta.get("uid", "N/A"),
-        "case": int(folder.name.split("_")[0][4:]) if folder.name.startswith("case") else "N/A",
-        "item_id": meta.get("item_id", "N/A"),
-        "date": meta.get("date", "N/A"),
-        "lat": meta.get("center_lat", "N/A"),
-        "lon": meta.get("center_lon", "N/A"),
-        "abun": meta.get("abun", "N/A"),
-        "abun_list": abun_list_str,
-        "per_clouds": meta.get("per_clouds", "N/A"),
-        "water_pixels": meta.get("water_pixels", "N/A"),
-        "high_pred": meta.get("High counts", -1),
-        "mod_pred": meta.get("Moderate counts ", -1),
-        "low_pred": meta.get("Low counts ", -1),
-        "pred_visual": "",
-        "source_path": str(folder)
-    }
-
-    excel_lock = SimpleFileLock(excel_file, timeout=EXCEL_LOCK_TIMEOUT)
-    if not acquire_with_retry(excel_lock, retries):
-        print("ERROR: Excel lock failed after retries")
+    # --- SUMMARY FILE ---
+    summary_lock = SimpleFileLock(summary_file, timeout=5)
+    if not acquire_with_retry(summary_lock, retries):
         return
 
     try:
-        if excel_file.exists():
-            df = pd.read_excel(excel_file)
+        row = {
+            "uid": meta.get("uid", "N/A"),
+            "case": int(folder.name.split("_")[0][4:]) if folder.name.startswith("case") else "N/A",
+            "item_id": meta.get("item_id", "N/A"),
+            "date": meta.get("date", "N/A"),
+            "lat": meta.get("center_lat", "N/A"),
+            "lon": meta.get("center_lon", "N/A"),
+            "abun": meta.get("abun", "N/A"),
+            "abun_list": abun_list_str,
+            "per_clouds": meta.get("per_clouds", "N/A"),
+            "water_pixels": meta.get("water_pixels", "N/A"),
+            "high_pred": meta.get("High counts", -1),
+            "mod_pred": meta.get("Moderate counts ", -1),
+            "low_pred": meta.get("Low counts ", -1),
+            "pred_visual": "",
+            "source_path": str(folder),
+            "create_image": 1
+        }
+
+        if Path(summary_file).exists():
+            df_s = pd.read_excel(summary_file)
         else:
-            df = pd.DataFrame()
+            df_s = pd.DataFrame()
 
-        for col in new_row:
-            if col not in df.columns:
-                df[col] = ""
-
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-
-        df.drop(columns=["pred_visual"], errors="ignore").to_excel(
-            summary_file, index=False
-        )
-
-        with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
-            df.to_excel(writer, index=False, sheet_name="Report")
-            workbook = writer.book
-            worksheet = writer.sheets["Report"]
-
-            col_idx = df.columns.get_loc("pred_visual")
-            for i, row in df.iterrows():
-                img = Path(row["source_path"]) / "cyfi_prediction_map.png"
-                if img.exists():
-                    img_data, w, _ = compress_image_to_bytes(img, (200, 200))
-                    if img_data:
-                        worksheet.embed_image(
-                            i + 1, col_idx, img.name,
-                            {"image_data": img_data, "object_position": 1}
-                        )
+        df_s = pd.concat([df_s, pd.DataFrame([row])], ignore_index=True)
+        df_s.to_excel(summary_file, index=False)
     finally:
-        excel_lock.release()
+        summary_lock.release()
