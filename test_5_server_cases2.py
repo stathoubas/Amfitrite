@@ -148,7 +148,7 @@ def search_optimized_windows(lat, lon, date_list):
 root_folder = r"/vol/amfitrite"
 sat_test_folder = os.path.join(root_folder, "sat_data", "v4")
 uids_processed_path = os.path.join(sat_test_folder, "uids_processed.xlsx")
-problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids.csv")
+problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids_2.csv")
 
 os.makedirs(sat_test_folder, exist_ok=True)
 
@@ -170,7 +170,7 @@ cases3_not_prev = [i for i in cases3 if i not in prev_cases]
 prev_cases.extend(cases3_not_prev)
 
 sev_2 = after2017_near_water[(after2017_near_water.severity == 2)].copy()
-cases2 = list(dict.fromkeys(sev_3.case.to_list()))
+cases2 = list(dict.fromkeys(sev_2.case.to_list()))
 cases2_not_prev = [i for i in cases2 if i not in prev_cases]
 
 
