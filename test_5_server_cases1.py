@@ -6,7 +6,7 @@ Created on Tue Dec 16 10:35:32 2025
 
 Parallel-Ready Script.
 Usage: Run multiple instances of this script simultaneously.
-Run for seveirty 3 excluding any case with severity 1, 4 and 5
+Run for seveirty 4 and 5 excluding any case with severity 1
 """
 
 import pandas as pd
@@ -146,7 +146,7 @@ def search_optimized_windows(lat, lon, date_list):
 root_folder = r"/vol/amfitrite"
 sat_test_folder = os.path.join(root_folder, "sat_data", "v4_2")
 uids_processed_path = os.path.join(sat_test_folder, "uids_processed.xlsx")
-problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids_3.csv")
+problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids_1.csv")
 
 os.makedirs(sat_test_folder, exist_ok=True)
 
@@ -155,23 +155,13 @@ df = pd.read_excel(os.path.join(root_folder, "clustered_only_square_2560m.xlsx")
 after2017 = df[(df.date >= "2017-01-01")]
 after2017_near_water = after2017[after2017["distance_to_water_m"] <= 10]
 sev_1 = after2017_near_water[(after2017_near_water.severity <= 1)].copy()
-prev_cases = list(dict.fromkeys(sev_1.case.to_list()))
-
-sev_45 = after2017_near_water[(after2017_near_water.severity >= 4)].copy()
-cases45 = list(dict.fromkeys(sev_45.case.to_list()))
-cases45_not_prev = [i for i in cases45 if i not in prev_cases]
-prev_cases.extend(cases45_not_prev)
-
-sev_3 = after2017_near_water[(after2017_near_water.severity == 3)].copy()
-sev_3.sort_values(by = "abun")
-cases3 = list(dict.fromkeys(sev_3.case.to_list()))
-cases3_not_prev = [i for i in cases3 if i not in prev_cases]
+cases1 = list(dict.fromkeys(sev_1.case.to_list()))
 
 
-print(f"----------> Starting Parallel Worker for cases with severity 3: {len(cases3_not_prev)}")
+print(f"----------> Starting Parallel Worker for cases with severity 1: {len(cases1)}")
 
 # 3. Processing Loop
-for iii, sel_case in enumerate(cases3_not_prev):
+for iii, sel_case in enumerate(cases1):
     
     # Short random sleep to prevent all workers hitting the API at the exact same time
     time.sleep(random.random() * 3)
@@ -204,7 +194,7 @@ for iii, sel_case in enumerate(cases3_not_prev):
         # Silently skip if done, to keep terminal clean
         continue
 
-    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases3_not_prev)}")
+    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases1)}")
 
     # 4. Search
     case_df['date_str'] = pd.to_datetime(case_df['date']).dt.strftime('%Y-%m-%d')

@@ -144,7 +144,7 @@ def search_optimized_windows(lat, lon, date_list):
 
 # --- Configuration ---
 root_folder = r"/vol/amfitrite"
-sat_test_folder = os.path.join(root_folder, "sat_data", "v4")
+sat_test_folder = os.path.join(root_folder, "sat_data", "v4_2")
 uids_processed_path = os.path.join(sat_test_folder, "uids_processed.xlsx")
 problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids_45.csv")
 
@@ -199,7 +199,7 @@ for iii, sel_case in enumerate(cases45_not_prev):
         # Silently skip if done, to keep terminal clean
         continue
 
-    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining)")
+    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases45_not_prev)}")
 
     # 4. Search
     case_df['date_str'] = pd.to_datetime(case_df['date']).dt.strftime('%Y-%m-%d')
