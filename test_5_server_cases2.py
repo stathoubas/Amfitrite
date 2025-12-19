@@ -76,6 +76,21 @@ def merge_time_windows(date_list, buffer_days=15):
     merged.append((curr_start, curr_end))
     return merged
 
+def get_catalog_with_retry(max_retries=10):
+    """
+    Tries to connect to Planetary Computer. 
+    If DNS fails (internet down), it waits and retries.
+    """
+    for attempt in range(max_retries):
+        try:
+            return Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
+        except Exception as e:
+            wait_time = (2 ** attempt) + random.random() * 5
+            print(f"   >>> Network Error connecting to Catalog: {e}")
+            print(f"   >>> Retrying in {wait_time:.1f}s...")
+            time.sleep(wait_time)
+    raise Exception("Critical Network Failure: Could not connect to Planetary Computer after multiple retries.")
+
 def search_with_retry(search_obj, max_retries=5):
     """Executes search.item_collection() with random jitter backoff."""
     for attempt in range(max_retries):
@@ -95,7 +110,7 @@ def search_with_retry(search_obj, max_retries=5):
 
 def search_optimized_windows(lat, lon, date_list):
     time_ranges = merge_time_windows(date_list)
-    catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
+    catalog = get_catalog_with_retry()
     bbox = get_bounding_box(lat, lon, 3000)
     
     all_items = []
