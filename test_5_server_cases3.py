@@ -144,7 +144,7 @@ def search_optimized_windows(lat, lon, date_list):
 
 # --- Configuration ---
 root_folder = r"/vol/amfitrite"
-sat_test_folder = os.path.join(root_folder, "sat_data", "v4_2")
+sat_test_folder = os.path.join(root_folder, "sat_data", "v4_3")
 uids_processed_path = os.path.join(sat_test_folder, "uids_processed.xlsx")
 problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids_3.csv")
 
