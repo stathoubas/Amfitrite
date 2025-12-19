@@ -263,17 +263,22 @@ for iii, sel_case in enumerate(cases1):
             continue
         
         # Run CyFi
-        folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
-        
-        if folder_ok:
-            summary_file_path_name = os.path.join(sat_test_folder, "Master_summary.xlsx")
-            processed_tracker = uids_processed_path
+        try:
+            folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
             
-            # This handles locking internally now
-            update_uids_and_summary_locked(folder_path=new_path, uids_file=uids_processed_path, summary_file=summary_file_path_name, retries=5)
-            print(f"----------> [SUCCESS] Case {sel_case} Updated.")
-        else:
+            if folder_ok:
+                summary_file_path_name = os.path.join(sat_test_folder, "Master_summary.xlsx")
+                processed_tracker = uids_processed_path
+                
+                # This handles locking internally now
+                update_uids_and_summary_locked(folder_path=new_path, uids_file=uids_processed_path, summary_file=summary_file_path_name, retries=5)
+                print(f"----------> [SUCCESS] Case {sel_case} Updated.")
+            else:
+                print(f"----------> [FAIL] CyFi failed for {sel_case}.")
+                log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
+        except:
             print(f"----------> [FAIL] CyFi failed for {sel_case}.")
             log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
+            
 
 print("----------> Worker batch complete.")
