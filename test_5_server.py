@@ -209,7 +209,7 @@ for iii, sel_case in enumerate(cases):
         print("----------> Skipping Case {sel_case} (all UIDs processed or problematic).")
         continue
 
-    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases1)}")
+    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases)}")
 
     # 4. Search
     case_df['date_str'] = pd.to_datetime(case_df['date']).dt.strftime('%Y-%m-%d')
