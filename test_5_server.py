@@ -6,6 +6,7 @@ Created on Tue Dec 16 10:35:32 2025
 
 Parallel-Ready Script.
 Usage: Run multiple instances of this script simultaneously.
+Run for seveirty 4 and 5 excluding any case with severity 1
 """
 
 import pandas as pd
@@ -73,6 +74,22 @@ def merge_time_windows(date_list, buffer_days=15):
     merged.append((curr_start, curr_end))
     return merged
 
+def get_catalog_with_retry(max_retries=10):
+    """
+    Tries to connect to Planetary Computer. 
+    If DNS fails (internet down), it waits and retries.
+    """
+    for attempt in range(max_retries):
+        try:
+            return Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
+        except Exception as e:
+            wait_time = (2 ** attempt) + random.random() * 5
+            print(f"   >>> Network Error connecting to Catalog: {e}")
+            print(f"   >>> Retrying in {wait_time:.1f}s...")
+            time.sleep(wait_time)
+    raise Exception("Critical Network Failure: Could not connect to Planetary Computer after multiple retries.")
+
+
 def search_with_retry(search_obj, max_retries=5):
     """Executes search.item_collection() with random jitter backoff."""
     for attempt in range(max_retries):
@@ -92,7 +109,7 @@ def search_with_retry(search_obj, max_retries=5):
 
 def search_optimized_windows(lat, lon, date_list):
     time_ranges = merge_time_windows(date_list)
-    catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
+    catalog = get_catalog_with_retry()
     bbox = get_bounding_box(lat, lon, 3000)
     
     all_items = []
@@ -142,32 +159,27 @@ def search_optimized_windows(lat, lon, date_list):
     return item_details
 
 # --- Configuration ---
-root_folder = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD"
-sat_test_folder = os.path.join(root_folder, "sat data test", "v1")
+root_folder = r"/vol/amfitrite"
+sat_test_folder = os.path.join(root_folder, "sat_data", "v4_3")
 uids_processed_path = os.path.join(sat_test_folder, "uids_processed.xlsx")
 problematic_uids_path = os.path.join(sat_test_folder, "problematic_uids.csv")
 
 os.makedirs(sat_test_folder, exist_ok=True)
 
 # 1. Load Data
-df = pd.read_excel(os.path.join(root_folder, "tick tick bloom data", "clustered_only_square_2560m.xlsx"))
+df = pd.read_excel(os.path.join(root_folder, "clustered_only_square_2560m.xlsx"))
 after2017 = df[(df.date >= "2017-01-01")]
 after2017_near_water = after2017[after2017["distance_to_water_m"] <= 10]
-low_sev = after2017_near_water[(after2017_near_water.severity <= 1)].copy()
-low_sev.sort_values(by = "abun", inplace = True)
+cases = list(dict.fromkeys(after2017_near_water.case.to_list()))
 
-low_sev_cases = list(dict.fromkeys(low_sev.case.to_list()))
 
-# 2. RANDOMIZE ORDER for Parallel Execution
-# This ensures Worker A and Worker B don't process the list in the same order
-random.shuffle(low_sev_cases)
-print(f"----------> Starting Parallel Worker. Total cases: {len(low_sev_cases)}")
+print(f"----------> Starting Parallel Worker for cases with severity 1: {len(cases)}")
 
 # 3. Processing Loop
-for iii, sel_case in enumerate(low_sev_cases):
+for iii, sel_case in enumerate(cases):
     
-    # Short random sleep to prevent all workers hitting the API at the exact same millisecond
-    time.sleep(random.random() * 2)
+    # Short random sleep to prevent all workers hitting the API at the exact same time
+    time.sleep(random.random() * 3)
 
     case_df = after2017_near_water[after2017_near_water.case == sel_case].copy()
     
@@ -194,10 +206,10 @@ for iii, sel_case in enumerate(low_sev_cases):
             except: pass
 
     if case_df.empty:
-        # Silently skip if done, to keep terminal clean
+        print("----------> Skipping Case {sel_case} (all UIDs processed or problematic).")
         continue
 
-    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining)")
+    print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases1)}")
 
     # 4. Search
     case_df['date_str'] = pd.to_datetime(case_df['date']).dt.strftime('%Y-%m-%d')
@@ -266,17 +278,22 @@ for iii, sel_case in enumerate(low_sev_cases):
             continue
         
         # Run CyFi
-        folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
-        
-        if folder_ok:
-            summary_file_path_name = os.path.join(sat_test_folder, "Master_summary.xlsx")
-            processed_tracker = uids_processed_path
+        try:
+            folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
             
-            # This handles locking internally now
-            update_uids_and_summary_locked(folder_path=new_path, uids_file=uids_processed_path, summary_file=summary_file_path_name, retries=5)
-            print(f"----------> [SUCCESS] Case {sel_case} Updated.")
-        else:
+            if folder_ok:
+                summary_file_path_name = os.path.join(sat_test_folder, "Master_summary.xlsx")
+                processed_tracker = uids_processed_path
+                
+                # This handles locking internally now
+                update_uids_and_summary_locked(folder_path=new_path, uids_file=uids_processed_path, summary_file=summary_file_path_name, retries=5)
+                print(f"----------> [SUCCESS] Case {sel_case} Updated.")
+            else:
+                print(f"----------> [FAIL] CyFi failed for {sel_case}.")
+                log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
+        except:
             print(f"----------> [FAIL] CyFi failed for {sel_case}.")
             log_problem_uids(points_df, "cyfi failed", problematic_uids_path)
+            
 
 print("----------> Worker batch complete.")
