@@ -139,6 +139,11 @@ def predict_using_cyfi_pipeline(input_folder_path,
     PIXEL_SIZE = 10
     WINDOW_PIXELS = WINDOW_METERS // PIXEL_SIZE 
     RADIUS_PIXELS = WINDOW_PIXELS // 2 
+    
+    # Check for SCL
+    if not (input_dir / "SCL_raw.tif").exists():
+        print("Error: SCL_raw.tif not found.")
+        return False, ""
 
     # 2. Load Raw Raster Data & Metadata
     required_bands = features_config.use_sentinel_bands 
@@ -153,6 +158,29 @@ def predict_using_cyfi_pipeline(input_folder_path,
     except FileNotFoundError:
         print("Error: SCL_raw.tif not found. Run Part 1 first.")
         return (False, "")
+    
+    # PRE-RUN BAND COMPATIBILITY CHECK
+    print("Verifying band compatibility...")
+    for band in required_bands:
+        if band == "SCL": continue
+        path = input_dir / f"{band}_raw.tif"
+        
+        # Check 1: File Existence
+        if not path.exists():
+            print(f"Compatibility Check Failed: Missing required band {band}.")
+            return False, ""
+            
+        # Check 2: Dimensions Check (Must match SCL)
+        # We open briefly just to check shape, then close
+        try:
+            with rioxarray.open_rasterio(path) as b_da:
+                b_shape = b_da.squeeze().shape
+                if b_shape != (height, width):
+                    print(f"Compatibility Check Failed: {band} shape {b_shape} does not match SCL shape {(height, width)}.")
+                    return False, ""
+        except Exception as e:
+            print(f"Compatibility Check Failed: Could not open {band}. Error: {e}")
+            return False, ""
 
     # Load Metadata (to retrieve reference points)
     metadata_path = input_dir / metadata_filename
