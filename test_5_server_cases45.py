@@ -268,7 +268,7 @@ for iii, sel_case in enumerate(cases45_not_prev):
             continue
         
         # Run CyFi
-        try
+        try:
             folder_ok, new_path = predict_using_cyfi_pipeline(out_folder, final_date)
             
             if folder_ok:
