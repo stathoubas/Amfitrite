@@ -201,7 +201,7 @@ for iii, sel_case in enumerate(cases3_not_prev):
             except: pass
 
     if case_df.empty:
-        # Silently skip if done, to keep terminal clean
+        print("----------> Skipping case (all UIDs processed or problematic).")
         continue
 
     print(f"----------> Processing Case {sel_case} ({len(case_df)} UIDs remaining) {iii} from {len(cases3_not_prev)}")
