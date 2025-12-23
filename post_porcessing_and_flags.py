@@ -6,10 +6,8 @@ Created on Mon Dec 22 17:55:45 2025
 """
 
 import pandas as pd
-import numpy as np
 import json
-import os
-import shutil
+import sys
 from pathlib import Path
 from tqdm import tqdm
 
@@ -45,11 +43,40 @@ def map_severity_to_class(sev_val):
         return None
     return None
 
-def process_master_file(output_filename, input_excel):
+def process_master_file(input_excel, output_filename, SEVERE_THRESH = 0.10, MODERATE_THRESH = 0.10, 
+                        RX_METERS = 300, NMIN_PIXELS = 50, ROUGHNESS_THRESH = 0.4, OUTLIER_THRESH = 0.15):
+    '''
+
+    Parameters
+    ----------
+    input_excel : str
+    output_filename : str
+    SEVERE_THRESH : float, optional
+        DESCRIPTION. percentage of points in the 10x10 pixel grid with class high, above which the label will be High 0,1 => 10%
+        The default is 0.10.
+    MODERATE_THRESH : float, optional
+        DESCRIPTION. percentage of points in the 10x10 pixel grid with class high and moderate, above which the label will be Moderate 0,1 => 10% 
+        The default is 0.10.
+    RX_METERS : float, optional
+        Radius of circle round the measuremnt that the cyfi will run to make predictions, create the log normal distribution to deremine
+        if the measrument is compatible with the predictions The default is 300.
+    NMIN_PIXELS : int, optional
+        Minimum numbr of points in the circle with radius RX_METERS that the measurement - predictions compatibility serach will run. The default is 50.
+    ROUGHNESS_THRESH : float, optional
+        The limit for the median variability of the entire image above which the image is flages as globally noisy. The default is 0.4.
+    OUTLIER_THRESH : float, optional
+        The maximum allowable percentage of individual pixels that deviate significantly from their neighbors above which the image is flagged as noisy. 
+        The default is 0.15.
+
+    Returns
+    -------
+    None.
+
+    '''
     print(f"--- Reading {input_excel} ---")
     
     try:
-        df = pd.read_csv(input_excel) if INPUT_EXCEL.endswith('.csv') else pd.read_excel(input_excel)
+        df = pd.read_csv(input_excel) if input_excel.endswith('.csv') else pd.read_excel(input_excel)
     except Exception as e:
         print(f"Error reading input file: {e}")
         return
@@ -98,16 +125,20 @@ def process_master_file(output_filename, input_excel):
                 
         except Exception as e:
             print(f"Row {idx} Severity Error: {e}")
+            df.at[idx, 'HAB_severity_index'] = -1
+            df.at[idx, 'HAB_status'] = "Error"
 
         # ---------------------------------------------------------
         # Path Handling
         # ---------------------------------------------------------
         source_path = row.get('source_path')
         if not source_path or pd.isna(source_path):
+            df.at[idx, 'compatible_severities'] = "Path Empty"
             continue
             
         folder_path = Path(source_path)
         if not folder_path.exists():
+            df.at[idx, 'compatible_severities'] = "Folder Not Found"
             continue
 
         # ---------------------------------------------------------
@@ -172,8 +203,12 @@ def process_master_file(output_filename, input_excel):
                     with open(folder_path / "metadata_2.json", 'w') as f:
                         json.dump(meta_data, f, indent=4)
                         
+            else:
+                df.at[idx, 'compatible_severities'] = "Calc Failed"
+                        
         except Exception as e:
             print(f"Row {idx} Compatibility Error: {e}")
+            df.at[idx, 'compatible_severities'] = "Error"
 
         # ---------------------------------------------------------
         # 4. Spatial Roughness
@@ -203,9 +238,22 @@ def process_master_file(output_filename, input_excel):
                         # Optional: Reset to 0 if clean? Or keep existing?
                         # Usually "Update" implies overwriting.
                         df.at[idx, 'pred_visual'] = 0
+                else:
+                    # File exists but status not OK (e.g. Too Sparse)
+                    df.at[idx, 'roughness_median'] = -2
+                    df.at[idx, 'outlier_fraction'] = -2
+            else:
+                # No CSV found
+                df.at[idx, 'roughness_median'] = -1
+                df.at[idx, 'outlier_fraction'] = -1
 
         except Exception as e:
              print(f"Row {idx} Roughness Error: {e}")
+             df.at[idx, 'roughness_median'] = -1
+             df.at[idx, 'outlier_fraction'] = -1
+             df.at[idx, 'num_points'] = -1
+             df.at[idx, 'num_outliers'] = -1
+             df.at[idx, 'pred_visual'] = 0
 
     try:
         if not output_filename.endswith('.xlsx'):
@@ -217,5 +265,13 @@ def process_master_file(output_filename, input_excel):
         print(f"Error saving file: {e}")
 
 if __name__ == "__main__":
-    user_out_name = input("Enter output filename (e.g., Master_v2): ")
-    process_master_file(user_out_name)
+    
+    if len(sys.argv) < 3:
+        print("Usage: python Master_Wrapper.py <input_file> <output_file>")
+        print("Example: python Master_Wrapper.py input_part_1.xlsx out_part_1.xlsx")
+        sys.exit(1)
+        
+    in_file = sys.argv[1]
+    out_file = sys.argv[2]
+    
+    process_master_file(in_file, out_file)
