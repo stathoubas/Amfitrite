@@ -10,6 +10,7 @@ import json
 import sys
 from pathlib import Path
 from tqdm import tqdm
+from time import time
 
 from compatibility_utils_v2 import calculate_compatibility_score, calculate_spatial_roughness 
 
@@ -91,9 +92,11 @@ def process_master_file(input_excel, output_filename, SEVERE_THRESH = 0.10, MODE
         df[col] = None
 
     print(f"--- Processing {len(df)} rows ---")
-
+    t0 = time()
+    t1 = time()
     for idx, row in tqdm(df.iterrows(), total=len(df)):
-        print("----------------------->  Hello ", idx)
+        print("----------------------->  Hello ", idx, round((time() - t0)/60, 1), round(time() - t1))
+        t1 = time()
         
         # ---------------------------------------------------------
         # 1. HAB Severity Index & 2. HAB Status
