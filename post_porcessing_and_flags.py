@@ -93,6 +93,7 @@ def process_master_file(input_excel, output_filename, SEVERE_THRESH = 0.10, MODE
     print(f"--- Processing {len(df)} rows ---")
 
     for idx, row in tqdm(df.iterrows(), total=len(df)):
+        print("----------------------->  Hello ", idx)
         
         # ---------------------------------------------------------
         # 1. HAB Severity Index & 2. HAB Status
