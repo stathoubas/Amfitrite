@@ -241,6 +241,10 @@ def predict_for_targets(input_folder_path, targets, Rx=300, Nmin=30):
         pipeline.predict_samples = samples_df
         pipeline._predict_model()
         results_df = pipeline.output_df 
+    except SystemExit as e:
+        print(f"   > CyFi triggered SystemExit (likely no valid data): {e}")
+        shutil.rmtree(temp_cache)
+        return None
     except Exception as e:
         print(f"CyFi Error: {e}")
         shutil.rmtree(temp_cache)
