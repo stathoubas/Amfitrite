@@ -82,7 +82,7 @@ def main():
         df_cases = pd.read_excel(INPUT_FILE)
 
     total_cases = len(df_cases)
-    total_cases_with_dates = df_cases.dates.str.split(",").str.len().sum()
+    total_cases_with_dates = df_cases.target_dates.str.split(",").str.len().sum()
     
     # 2. Load Processed State (Resume Feature)
     processed_uids = load_processed_uids(PROCESSED_LOG)
