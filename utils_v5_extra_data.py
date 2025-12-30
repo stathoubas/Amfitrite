@@ -144,7 +144,7 @@ def find_satelite_images(p_lat, p_lon, sel_date, meter_buffer = 3000):
         by="datetime"
     )
 
-    item_details["per_clouds"] = -1
+    item_details["per_clouds"] = -1.0
     # the commented code below finds the cloud coverage of the whole image
     '''
     for it, row in item_details.iterrows():
@@ -559,6 +559,11 @@ def predict_using_cyfi_pipeline(input_folder_path,
             config=features_config,
             cache_dir=temp_cache
         )
+    
+    except SystemExit as e:
+        print(f"   > CyFi triggered SystemExit (likely no valid data): {e}")
+        shutil.rmtree(temp_cache)
+        return (False, "")
     except Exception as e:
         print(f"Feature generation failed: {e}")
         shutil.rmtree(temp_cache)
