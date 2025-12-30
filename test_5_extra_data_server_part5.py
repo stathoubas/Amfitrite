@@ -51,13 +51,13 @@ def log_problematic(uid, case, reason, filepath):
 
 # --- CONFIGURATION ---
 # Input file (Excel or CSV)
-INPUT_FILE = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\extra_low_cases\cases_not_low_lat_lon.xlsx" 
+INPUT_FILE = "/vol/Amfitrite/sat_data/extra_data_no_low_cases/cases_not_low_lat_lon_part5.xlsx"
 
 # Output directories and logs
-OUTPUT_ROOT_FOLDER = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test"
-PROCESSED_LOG = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\extra_low_cases\processed_uids.xlsx"  # MUST be .xlsx to match utils function
-SUMMARY_LOG = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\extra_low_cases\Master_summary.xlsx"    # MUST be .xlsx
-PROBLEMATIC_LOG = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\extra_low_cases\problematic_uids.csv" # CSV is fine for simple error logging
+OUTPUT_ROOT_FOLDER = "/vol/Amfitrite/sat_data/extra_data_no_low_cases"
+PROCESSED_LOG = "/vol/Amfitrite/sat_data/extra_data_no_low_cases/processed_uids_part5.xlsx"
+SUMMARY_LOG = "/vol/Amfitrite/sat_data/extra_data_no_low_cases/Master_summary_part5.xlsx"
+PROBLEMATIC_LOG = "/vol/Amfitrite/sat_data/extra_data_no_low_cases/problematic_uids_part5.csv"
 
 # Parameters
 SEARCH_BUFFER_METERS = 3000

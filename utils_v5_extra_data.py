@@ -246,10 +246,10 @@ def extract_and_save_tile(
     # --- 3. PREPARE METADATA ---
     # Simplified to just store the current case info since points_df is gone
     points_data_list = [{
-        'case': str(case_id),
+        'case': str(case_id.split("_")[0]),
         'lat': center_lat,
         'lon': center_lon,
-        'date': str(item.datetime.date())
+        'date': str(case_id.split("_")[1])
     }]
 
     # 5. Asset Clipping
@@ -378,7 +378,7 @@ def extract_and_save_tile(
             "item_id": item.id,
             "per_clouds": calculated_per_clouds,
             "water_pixels": calculated_water_pixels,
-            "uid": str(case_id), # Modified to use argument
+            "uid": case_id, # Modified to use argument
             "abun": "N/A", # Not available in simple mode
             "tile_size_10m_pixels": final_pixel_side,
             "date": item.properties["datetime"].split('T')[0],
