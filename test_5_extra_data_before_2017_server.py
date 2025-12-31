@@ -54,10 +54,10 @@ def log_problematic(uid, case, reason, filepath):
 INPUT_FILE = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_before_2017/cases_not_not_previously_processed_before_2017.xlsx"
 
 # Output directories and logs
-OUTPUT_ROOT_FOLDER = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_after_2017"
-PROCESSED_LOG = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_after_2017/processed_uids.xlsx"
-SUMMARY_LOG = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_after_2017/Master_summary.xlsx"
-PROBLEMATIC_LOG = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_after_2017/problematic_uids.csv"
+OUTPUT_ROOT_FOLDER = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_before_2017"
+PROCESSED_LOG = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_before_2017/processed_uids.xlsx"
+SUMMARY_LOG = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_before_2017/Master_summary.xlsx"
+PROBLEMATIC_LOG = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_before_2017/problematic_uids.csv"
 
 # Parameters
 SEARCH_BUFFER_METERS = 3000
