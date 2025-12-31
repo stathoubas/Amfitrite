@@ -79,12 +79,18 @@ def generate_missing_dates_only(date_input_str):
 
 
 df = pd.read_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\from_server\Master_summary_all_parts_with_flags_v3.xlsx")
-
+'''
 cases = list(set(df.case))
 cases_low = list(set(df[df.Class == "Low"].case))
 
 cases_not_low = [i for i in cases if i not in cases_low]
 cases_not_low.sort()
+'''
+cases = list(set(df.case))
+cases_high = list(set(df[df.Class == "High"].case))
+
+cases_not_high = [i for i in cases if i not in cases_high]
+cases_not_high.sort()
 
 cs = []
 lats = []
@@ -94,7 +100,7 @@ target_dates = []
 vs = []
 all_counts = []
 
-for c in cases_not_low:
+for c in cases_not_high:
     df_c = df[df.case == c]
     paths = list(set(df_c.source_path))
     
@@ -133,6 +139,9 @@ for c in cases_not_low:
     all_counts.append(np.mean(counts))
         
     
-df_cases_not_low_lat_lon = pd.DataFrame({'case': cs, 'lat': lats, 'lon': lons, "counts":all_counts, "dates":dates_outer, "target_dates":target_dates, "version":vs})
-df_cases_not_low_lat_lon.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\from_server\cases_not_low_lat_lon.xlsx", index=False)
+#df_cases_not_low_lat_lon = pd.DataFrame({'case': cs, 'lat': lats, 'lon': lons, "counts":all_counts, "dates":dates_outer, "target_dates":target_dates, "version":vs})
+#df_cases_not_low_lat_lon.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\from_server\cases_not_low_lat_lon.xlsx", index=False)
+
+df_cases_not_high_lat_lon = pd.DataFrame({'case': cs, 'lat': lats, 'lon': lons, "counts":all_counts, "dates":dates_outer, "target_dates":target_dates, "version":vs})
+df_cases_not_high_lat_lon.to_excel(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\from_server\cases_not_high_lat_lon.xlsx", index=False)
 
