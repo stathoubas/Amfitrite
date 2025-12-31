@@ -51,7 +51,7 @@ def log_problematic(uid, case, reason, filepath):
 
 # --- CONFIGURATION ---
 # Input file (Excel or CSV)
-INPUT_FILE = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_100_to_500/cases_not_not_previously_processed_before_2017.xlsx"
+INPUT_FILE = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_100_to_500/cases_not_not_previously_processed_100_to_500.xlsx"
 
 # Output directories and logs
 OUTPUT_ROOT_FOLDER = "/vol/Amfitrite/sat_data/extra_cases_not_previously_processed_100_to_500"
