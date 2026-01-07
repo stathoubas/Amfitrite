@@ -157,6 +157,6 @@ def save_and_exit(df, path):
 # --- Execution ---
 if __name__ == "__main__":
     # Update this path to your actual file
-    FILE_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\from_server\Master_summary_all_parts_with_flags_and_extra_cases_v7_unique uids.xlsx"
+    FILE_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\sat data test\from_server\Master_summary_all_parts_with_flags_and_extra_cases_v7_unique_uids_resolved.xlsx"
     
     interactive_duplicate_resolver(FILE_PATH)
