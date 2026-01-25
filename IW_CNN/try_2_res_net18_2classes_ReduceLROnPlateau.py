@@ -54,7 +54,7 @@ class HABDataset(Dataset):
         ]
         
         # Map text labels to integers for the CNN
-        self.label_map = {"Low": 0, "Moderate": 1, "High": 2}
+        self.label_map = {"Low": 0, "Moderate": 1, "High": 1}
 
     def __len__(self):
         return len(self.df)
@@ -146,22 +146,30 @@ class HABLightningModel(L.LightningModule):
         
         # 1. Build the Architecture with the Surgery logic
         self.model = self._build_model(self.hparams.mode, self.hparams.weights_path)
+                
+        # 2. Define Weights: [Low, Bloom]
+        self.register_buffer("class_weights", torch.tensor([2.3, 1.0]))    
+       
+        # 3. Loss Function
+        self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
         
-        # 2. Loss Function
-        self.criterion = nn.CrossEntropyLoss()
-        
-        # 3. Define Weights: [Low, Moderate, High]
-        # We increase Moderate to 2.0 to force the model to prioritize its errors.
-        #self.register_buffer("class_weights", torch.tensor([1.1, 2.0, 0.8]))
         
         # 3. Metrics Setup (Accuracy, F1, and Per-Class)
         def get_metrics(prefix):
             return torchmetrics.MetricCollection({
-                'acc': MulticlassAccuracy(num_classes=3, average='macro'),
-                'f1': MulticlassF1Score(num_classes=3, average='macro'),
+                # Standard Accuracy (biased towards majority)
+                'acc': MulticlassAccuracy(num_classes=2, average='micro'),
+                
+                # Balanced Accuracy (Fair average of Recall_Low and Recall_Bloom)
+                'bal_acc': MulticlassAccuracy(num_classes=2, average='macro'),
+                
+                # Macro F1 (The gold standard for stopping)
+                'f1': MulticlassF1Score(num_classes=2, average='macro'),
+                
+                # Per-class breakdown
                 'per_class': ClasswiseWrapper(
-                    MulticlassAccuracy(num_classes=3, average=None),
-                    labels=["Low", "Moderate", "High"]
+                    MulticlassAccuracy(num_classes=2, average=None),
+                    labels=["Low", "Bloom"]
                 )
             }, prefix=prefix)
 
@@ -214,7 +222,7 @@ class HABLightningModel(L.LightningModule):
 
         # Step B: Head Surgery (Change output from 1000 to 3 classes)
         num_ftrs = model.fc.in_features
-        model.fc = nn.Linear(num_ftrs, 3)
+        model.fc = nn.Linear(num_ftrs, 2)
         
         return model
 
@@ -252,7 +260,7 @@ class HABLightningModel(L.LightningModule):
         self.log_dict(output)
         self.val_metrics.reset()
     
-    '''    
+    
     def configure_optimizers(self):
         # 1. Use self.hparams.lr to grab the value you passed in __init__
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -278,7 +286,7 @@ class HABLightningModel(L.LightningModule):
     def configure_optimizers(self):
         # Using AdamW as it is better for transformers/modern CNNs
         return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
-
+    '''
 
 def prepare_dataset_registry_and_split(excel_path, data_root, output_registry_path):
     """
@@ -397,19 +405,29 @@ def plot_training_history(csv_path, output_dir="plots"):
     # 2. F1 Score Plot (Macro)
     save_plot('train_f1', 'val_f1', "Macro F1 Score (Balance)", "2_f1_curve.png")
 
-    # 3. Accuracy: Low
-    # We pass a dummy name containing 'per_class' and 'Low' to trigger the search logic
+    # --- PLOT 3: Balanced vs Standard Accuracy ---
+    plt.figure(figsize=(10, 6))
+    if 'val_acc' in metrics.columns and 'val_bal_acc' in metrics.columns:
+        clean_data = metrics[['epoch', 'val_acc', 'val_bal_acc']].dropna()
+        plt.plot(clean_data['epoch'], clean_data['val_acc'], label='Standard Accuracy (Micro)', marker='o', linestyle='--')
+        plt.plot(clean_data['epoch'], clean_data['val_bal_acc'], label='Balanced Accuracy (Macro)', marker='o', linewidth=2)
+        plt.title("Standard vs Balanced Accuracy")
+        plt.xlabel("Epochs")
+        plt.ylabel("Accuracy")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_dir}/3_acc_comparison.png")
+        plt.close()
+        print("Saved: 3_acc_comparison.png")
+
+    # --- PLOT 4: Accuracy Low Class ---
     save_plot('train_per_class_Low', 'val_per_class_Low', 
-              "Accuracy: Low Class", "3_acc_low_curve.png")
+              "Accuracy: Low Class (Specificity  - True Negative Rate)", "4_acc_low_curve.png")
 
-    # 4. Accuracy: Moderate
-    save_plot('train_per_class_Moderate', 'val_per_class_Moderate', 
-              "Accuracy: Moderate Class", "4_acc_moderate_curve.png")
-
-    # 5. Accuracy: High
-    save_plot('train_per_class_High', 'val_per_class_High', 
-              "Accuracy: High Class", "5_acc_high_curve.png")
-
+    # --- PLOT 5: Accuracy Bloom Class ---
+    # Note: Label is 'Bloom' because we renamed it in the MetricsCollection
+    save_plot('train_per_class_Bloom', 'val_per_class_Bloom', 
+             "Accuracy: Bloom Class (Recall - True Positive Rate)", "5_acc_bloom_curve.png")
 
 def evaluate_split(model, loader, device, split_name="Test", output_dir="plots"):
     """Runs inference and generates a confusion matrix."""
@@ -425,16 +443,17 @@ def evaluate_split(model, loader, device, split_name="Test", output_dir="plots")
             _, preds = torch.max(outputs, 1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
-    
-    # Text Report
-    print(classification_report(all_labels, all_preds, target_names=["Low", "Moderate", "High"]))
+            
+    # Text Report with correct names
+    # Class 0 = Low, Class 1 = Bloom
+    print(classification_report(all_labels, all_preds, target_names=["Low", "Bloom"]))
     
     # Confusion Matrix Plot
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                xticklabels=["Low", "Mod", "High"], 
-                yticklabels=["Low", "Mod", "High"])
+                xticklabels=["Low", "Bloom"], 
+                yticklabels=["Low", "Bloom"])
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
     plt.title(f"Confusion Matrix ({split_name})")
@@ -452,7 +471,7 @@ if __name__ == "__main__":
     EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
     DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
     registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18\junk"
+    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results4"
     Logger_path = output_path
     batch_size = 32
     num_workers = 8
@@ -469,8 +488,8 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
 
     # --- 2. SETUP MODEL & LOGGER ---
-    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
-    model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
+    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
+    model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
     
     logger = CSVLogger(output_path, name="hab_experiment")
     
@@ -485,7 +504,7 @@ if __name__ == "__main__":
     # 2. Define Early Stopping (Stops training if no improvement)
     early_stop_callback = EarlyStopping(
         monitor="val_f1",  # Watch the F1 score
-        patience=10,       # Wait 10 epochs for an improvement before stopping
+        patience=20,       # Wait 10 epochs for an improvement before stopping
         mode="max",        # Higher is better
         verbose=True       # Print a message when it stops
     )    
@@ -525,7 +544,7 @@ if __name__ == "__main__":
     )
     '''
     trainer = L.Trainer(
-        max_epochs=50,             # Increased for generic mode
+        max_epochs=60,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
         precision="32-true",
