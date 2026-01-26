@@ -484,12 +484,12 @@ if __name__ == "__main__":
     
     # --- 1. SETUP DATA ---
     # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
-    EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
-    DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
-    registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res50\results2"
+    EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
+    DATA_ROOT = "/home/kostas/AMFITRITE/data"
+    registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
+    output_path = "/home/kostas/AMFITRITE/res50/results2"
     Logger_path = output_path
-    batch_size = 32
+    batch_size = 64
     num_workers = 8
 
     df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
@@ -499,9 +499,9 @@ if __name__ == "__main__":
     test_ds = HABDataset(df, DATA_ROOT, mode='test')
     
     # Batch Size 8 for 4GB GPU
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True, prefetch_factor=4, persistent_workers=True)
+    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, prefetch_factor=4,  persistent_workers=True)
+    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, prefetch_factor=4,  persistent_workers=True)
 
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
@@ -521,7 +521,7 @@ if __name__ == "__main__":
     # 2. Define Early Stopping (Stops training if no improvement)
     early_stop_callback = EarlyStopping(
         monitor="val_f1",  # Watch the F1 score
-        patience=10,       # Wait 10 epochs for an improvement before stopping
+        patience=30,       # Wait 10 epochs for an improvement before stopping
         mode="max",        # Higher is better
         verbose=True       # Print a message when it stops
     )    
@@ -550,7 +550,7 @@ if __name__ == "__main__":
 
 
     trainer = L.Trainer(
-        max_epochs=50,             # Increased for generic mode
+        max_epochs=200,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
         precision="32-true",
