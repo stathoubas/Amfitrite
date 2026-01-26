@@ -454,7 +454,7 @@ if __name__ == "__main__":
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
     output_path = "/home/kostas/AMFITRITE/res50/results0"
     Logger_path = output_path
-    batch_size = 32
+    batch_size = 64
     num_workers = 8
 
     df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
@@ -464,9 +464,9 @@ if __name__ == "__main__":
     test_ds = HABDataset(df, DATA_ROOT, mode='test')
     
     # Batch Size 8 for 4GB GPU
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=False)
+    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=False)
+    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=False)
 
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
