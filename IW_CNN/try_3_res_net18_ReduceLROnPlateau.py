@@ -32,6 +32,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torchinfo import summary
 from torchview import draw_graph
 from pytorch_lightning.callbacks import EarlyStopping
+from safetensors.torch import load_file
 
 
 class HABDataset(Dataset):
@@ -48,10 +49,10 @@ class HABDataset(Dataset):
         
         # Define the exact order of bands to ensure the 12-channel stack is consistent
         self.band_names = [
-            "B01_raw.tif", "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", 
-            "B05_raw.tif", "B06_raw.tif", "B07_raw.tif", "B08_raw.tif", 
-            "B8A_raw.tif", "B09_raw.tif", "B11_raw.tif", "B12_raw.tif"
+            "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", "B05_raw.tif", "B06_raw.tif",
+            "B07_raw.tif", "B08_raw.tif", "B8A_raw.tif", "B11_raw.tif", "B12_raw.tif"
         ]
+        
         
         # Map text labels to integers for the CNN
         self.label_map = {"Low": 0, "Moderate": 1, "High": 2}
@@ -117,65 +118,21 @@ class HABDataset(Dataset):
         # 3. Masking
         masked_data = self.apply_water_mask(bands_stack, scl)
         
-                
-        # 4. Extract indices
-        # Band Mapping based on self.band_names list:
-        # 0:B01, 1:B02(Blue), 2:B03(Green), 3:B04(Red), 4:B05(RE1), 
-        # 7:B08(NIR), 10:B11(SWIR)
+        # 4. Convert to Torch Tensor
+        tensor = torch.from_numpy(masked_data)
         
-        # Add epsilon to avoid division by zero
-        eps = 1e-8
-        
-        b_blue  = masked_data[1]
-        b_green = masked_data[2]
-        b_red   = masked_data[3]
-        b_re1   = masked_data[4]
-        b_nir   = masked_data[7]
-        b_swir  = masked_data[10]
-
-        # 1. NDVI (Vegetation/Algae biomass)
-        ndvi = (b_nir - b_red) / (b_nir + b_red + eps)
-        
-        # 2. NDWI (McFeeters - Water body delineation)
-        ndwi = (b_green - b_nir) / (b_green + b_nir + eps)
-        
-        # 3. MNDWI (Modified NDWI - usually better for open water)
-        mndwi = (b_green - b_swir) / (b_green + b_swir + eps)
-        
-        # 4. NDCI (Normalized Difference Chlorophyll Index - CRITICAL for HAB)
-        ndci = (b_re1 - b_red) / (b_re1 + b_red + eps)
-        
-        # 5. NDre (Normalized Difference Red Edge - Good for vegetation stress/bloom)
-        ndre = (b_nir - b_re1) / (b_nir + b_re1 + eps)
-        
-        # 6. NDTI (Normalized Difference Turbidity Index - Requested)
-        ndti = (b_red - b_green) / (b_red + b_green + eps)
-        
-        # 7. SABI (Surface Algal Bloom Index - Requested)
-        sabi = (b_nir - b_red) / (b_blue + b_green + eps)
-        
-        # Stack indices: Shape becomes (7, 365, 365)
-        indices_stack = np.stack([ndvi, ndwi, mndwi, ndci, ndre, ndti, sabi], axis=0)
-        
-        # Concatenate with raw data: Shape becomes (19, 365, 365)
-        # We assume masked_data is already float32.
-        full_stack = np.concatenate([masked_data, indices_stack], axis=0)
-
-        # 5. Convert to Torch Tensor
-        tensor = torch.from_numpy(full_stack)
-        
-        # 6. Resize from 365x365 to 256x256
+        # 5. Resize from 365x365 to 256x256
         # (Using unsqueeze because interpolate expects a batch dimension)
         tensor = tensor.unsqueeze(0) 
         tensor = torch.nn.functional.interpolate(
             tensor, size=(256, 256), mode='bilinear', align_corners=False
         ).squeeze(0)
         
-        # 7. Normalization
+        # 6. Normalization
         # Divide by 10,000 to bring Sentinel-2 DN values to roughly 0-1
         tensor = tensor / 10000.0
         
-        # 8. Augmentation (Only for training!)
+        # 7. Augmentation (Only for training!)
         if self.mode == 'training':
             tensor = self.apply_augmentations(tensor)
             
@@ -196,7 +153,7 @@ class HABLightningModel(L.LightningModule):
         
         # 3. Define Weights: [Low, Moderate, High]
         # We increase Moderate to 2.0 to force the model to prioritize its errors.
-        self.register_buffer("class_weights", torch.tensor([1.1, 2.0, 0.8]))
+        #self.register_buffer("class_weights", torch.tensor([1.1, 2.0, 0.8]))
         
         # 3. Metrics Setup (Accuracy, F1, and Per-Class)
         def get_metrics(prefix):
@@ -211,29 +168,24 @@ class HABLightningModel(L.LightningModule):
 
         self.train_metrics = get_metrics('train_')
         self.val_metrics = get_metrics('val_')
-    
+
     def _build_model(self, mode, weights_path):
         # Start with a "raw" ResNet18 structure
         model = models.resnet18(weights=None)
         
-        # Total input channels = 12 (Raw) + 7 (Indices) = 19
-        input_channels = 19
-        
-        # Step A: Stem Surgery
-        # We define a new conv1 with 19 input filters
-        model.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # Step A: Stem Surgery (Change input from 3 to 12 channels)
+        # We define a new conv1 with 12 input filters
+        model.conv1 = nn.Conv2d(10, 64, kernel_size=7, stride=2, padding=3, bias=False)
         
         if mode == 'generic':
             # Option A: Inflate ImageNet weights
-            print(f"Mode: Generic - Inflating ImageNet weights to {input_channels} channels...")
+            print("Mode: Generic - Inflating ImageNet weights to 12 channels...")
             temp_resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
             with torch.no_grad():
-                # Average the RGB weights (shape: 64, 3, 7, 7) -> (64, 1, 7, 7)
+                # Average the RGB weights and repeat for 12 bands
                 w_avg = temp_resnet.conv1.weight.mean(dim=1, keepdim=True)
-                # Repeat for all 19 channels
-                model.conv1.weight.copy_(w_avg.repeat(1, input_channels, 1, 1))
-            
-            # Load the rest of the pretrained body
+                model.conv1.weight.copy_(w_avg.repeat(1, 12, 1, 1))
+            # Load the rest of the pretrained body (layers after conv1)
             state_dict = temp_resnet.state_dict()
             del state_dict['conv1.weight']
             model.load_state_dict(state_dict, strict=False)
@@ -244,33 +196,57 @@ class HABLightningModel(L.LightningModule):
             state_dict = torch.load(weights_path, map_location='cpu')
             if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
             
+            # Key cleaning (stripping 'backbone.' or 'module.' prefixes)
             new_state_dict = {}
             for k, v in state_dict.items():
                 name = k.replace('module.', '').replace('backbone.', '')
                 
                 # Check for the first layer weights
                 if name == 'conv1.weight' and v.shape[1] == 13:
-                    # 1. Extract the 12 spectral bands (as before)
-                    # Keep 0-9, skip 10, keep 11-12
+                    # THE SURGERY: Keep indices 0-9 (B01-B09, incl B8A) 
+                    # and skip 10 (B10), then keep 11-12 (B11-B12)
                     keep_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]
-                    w_spectral = v[:, keep_indices, :, :] # Shape: [64, 12, 7, 7]
-                    
-                    # 2. Initialize weights for the 7 indices
-                    # We use the mean of the spectral weights to initialize the indices.
-                    # This is better than random initialization.
-                    w_mean = w_spectral.mean(dim=1, keepdim=True) # Shape: [64, 1, 7, 7]
-                    w_indices = w_mean.repeat(1, 7, 1, 1) # Shape: [64, 7, 7, 7]
-                    
-                    # 3. Concatenate to make 19 channels
-                    w_total = torch.cat([w_spectral, w_indices], dim=1) # Shape: [64, 19, 7, 7]
-                    
-                    new_state_dict[name] = w_total
-                else:
-                    new_state_dict[name] = v
+                    v = v[:, keep_indices, :, :]
+                
+                new_state_dict[name] = v
             
-            # Load everything
+            # Load everything we cleaned. strict=False allows the 3-class FC layer to stay random.
             model.load_state_dict(new_state_dict, strict=False)
-
+            
+        elif mode == 'bigearthnet':
+            print(f"Mode: BigEarthNet - Loading Pretrained Weights from {weights_path}...")
+            
+            # Load the file
+            if weights_path.endswith('.safetensors'):
+                state_dict = load_file(weights_path)
+            else:
+                state_dict = torch.load(weights_path, map_location='cpu')
+            
+            # Handling nested dictionaries (common in HF/PyTorch)
+            if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
+            elif 'model_state_dict' in state_dict: state_dict = state_dict['model_state_dict']
+            
+            # Key Cleaning (Removing prefixes like 'module.' or 'backbone.')
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                # We strip "model.vision_encoder." because your inspection showed it!
+                name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '')
+                if "fc." in name:
+                    continue
+                new_state_dict[name] = v
+            
+            # Load the weights
+            # Now that shapes match (10 vs 10) and names match (conv1 vs conv1), 
+            # this will SUCCEED in loading the weights.
+            missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
+            
+            print("Weights Loaded.") 
+            # Verification: Check if conv1.weight is in the 'missing' list.
+            if 'conv1.weight' in missing:
+                print("CRITICAL WARNING: conv1.weight was NOT loaded! Check names again.")
+            else:
+                print("SUCCESS: conv1.weight loaded successfully!")
+            
         # Step B: Head Surgery (Change output from 1000 to 3 classes)
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, 3)
@@ -311,7 +287,7 @@ class HABLightningModel(L.LightningModule):
         self.log_dict(output)
         self.val_metrics.reset()
     
-     
+       
     def configure_optimizers(self):
         # 1. Use self.hparams.lr to grab the value you passed in __init__
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -511,7 +487,7 @@ if __name__ == "__main__":
     EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
     DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
     registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_7_extra_indices\results6"
+    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18\results9"
     Logger_path = output_path
     batch_size = 32
     num_workers = 8
@@ -528,8 +504,9 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
 
     # --- 2. SETUP MODEL & LOGGER ---
-    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
-    model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
+    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
+    #model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
+    model = HABLightningModel(mode='bigearthnet', lr=1e-5, weights_path=r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0\model.safetensors")
     
     logger = CSVLogger(output_path, name="hab_experiment")
     
@@ -544,7 +521,7 @@ if __name__ == "__main__":
     # 2. Define Early Stopping (Stops training if no improvement)
     early_stop_callback = EarlyStopping(
         monitor="val_f1",  # Watch the F1 score
-        patience=20,       # Wait 10 epochs for an improvement before stopping
+        patience=10,       # Wait 10 epochs for an improvement before stopping
         mode="max",        # Higher is better
         verbose=True       # Print a message when it stops
     )    
@@ -552,7 +529,7 @@ if __name__ == "__main__":
     print("\n--- Model Summary ---")
     # Input size: (Batch_Size, Channels, Height, Width)
     # We use Batch=batch_size, Channels=12, Size=256x256
-    summary(model, input_size=(batch_size, 19, 256, 256))
+    summary(model, input_size=(batch_size, 10, 256, 256))
 
     print("\n--- Generating Architecture Diagram ---")
     if not os.path.exists(output_path):
@@ -561,7 +538,7 @@ if __name__ == "__main__":
         # This creates a visual graph of the flow
         model_graph = draw_graph(
             model, 
-            input_size=(batch_size, 19, 256, 256), 
+            input_size=(batch_size, 10, 256, 256), 
             expand_nested=True,
             graph_name='HAB_ResNet18_Arch',
             save_graph=True,  # Saves a PDF/PNG
@@ -571,8 +548,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Skipping visualization (Graphviz not found or error): {e}")
 
+
     trainer = L.Trainer(
-        max_epochs=60,             # Increased for generic mode
+        max_epochs=50,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
         precision="32-true",
