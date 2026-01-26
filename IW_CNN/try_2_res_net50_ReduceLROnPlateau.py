@@ -470,7 +470,7 @@ if __name__ == "__main__":
 
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
-    model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet50_S2-L1C_13_bands\B13_rn50_moco_0099_ckpt.pth')
+    model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet50_S2-L1C_13_bands/B13_rn50_moco_0099_ckpt.pth')
     
     logger = CSVLogger(output_path, name="hab_experiment")
     
