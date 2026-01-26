@@ -452,7 +452,7 @@ if __name__ == "__main__":
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
-    output_path = "/home/kostas/AMFITRITE/res50/results0"
+    output_path = "/home/kostas/AMFITRITE/res50/results1"
     Logger_path = output_path
     batch_size = 64
     num_workers = 8
@@ -485,7 +485,7 @@ if __name__ == "__main__":
     # 2. Define Early Stopping (Stops training if no improvement)
     early_stop_callback = EarlyStopping(
         monitor="val_f1",  # Watch the F1 score
-        patience=10,       # Wait 10 epochs for an improvement before stopping
+        patience=30,       # Wait 10 epochs for an improvement before stopping
         mode="max",        # Higher is better
         verbose=True       # Print a message when it stops
     )    
@@ -512,20 +512,9 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Skipping visualization (Graphviz not found or error): {e}")
 
-    '''
-    # --- 3. TRAIN ---
+    
     trainer = L.Trainer(
-        max_epochs=20,
-        accelerator="gpu",
-        devices=1,
-        precision="16-mixed",
-        logger=logger,
-        callbacks=[checkpoint_callback],
-        log_every_n_steps=10
-    )
-    '''
-    trainer = L.Trainer(
-        max_epochs=50,             # Increased for generic mode
+        max_epochs=200,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
         precision="32-true",
