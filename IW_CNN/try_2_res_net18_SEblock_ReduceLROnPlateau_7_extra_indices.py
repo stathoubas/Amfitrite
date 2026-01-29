@@ -32,7 +32,110 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torchinfo import summary
 from torchview import draw_graph
 from pytorch_lightning.callbacks import EarlyStopping
-from safetensors.torch import load_file
+
+from torchvision.models.resnet import conv3x3, conv1x1
+from torchvision.models.resnet import ResNet
+
+
+class SEBlock(nn.Module):
+    """
+    Squeeze-and-Excitation Block.
+    It adaptively recalibrates channel-wise feature responses by explicitly modelling 
+    interdependencies between channels.
+    """
+    def __init__(self, in_channels, reduction=16):
+        super(SEBlock, self).__init__()
+        
+        # 1. Squeeze: Global Average Pooling
+        # Collapses spatial dimensions (H x W) into a single number per channel.
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        
+        # 2. Excitation: Multilayer Perceptron (MLP)
+        # Allows the network to learn relationships between channels.
+        self.fc = nn.Sequential(
+            # Reduce dimension (compress information)
+            nn.Linear(in_channels, in_channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            # Expand dimension back to original count
+            nn.Linear(in_channels // reduction, in_channels, bias=False),
+            # Sigmoid outputs a weight between 0 and 1 for each channel
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        
+        # Step 1: Squeeze
+        # Input: (Batch, C, H, W) -> Output: (Batch, C)
+        y = self.avg_pool(x).view(b, c)
+        
+        # Step 2: Excitation
+        # Calculate importance weights for each channel
+        y = self.fc(y)
+        
+        # Step 3: Scale
+        # Reshape weights to (Batch, C, 1, 1) to match input dimensions
+        y = y.view(b, c, 1, 1)
+        
+        # Multiply the original input 'x' by the learned weights 'y'
+        return x * y
+    
+
+class SEBasicBlock(nn.Module):
+    """
+    Standard ResNet BasicBlock with Squeeze-and-Excitation inserted.
+    Based on torchvision.models.resnet.BasicBlock
+    """
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                 base_width=64, dilation=1, norm_layer=None, reduction=16):
+        super(SEBasicBlock, self).__init__()
+        
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        if groups != 1 or base_width != 64:
+            raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+        if dilation > 1:
+            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+            
+        # Standard ResNet Layers
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn1 = norm_layer(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = norm_layer(planes)
+        
+        # --- NEW: The SE Block ---
+        # We insert it after the convolutions but before the residual addition
+        self.se = SEBlock(planes, reduction=reduction)
+        # -------------------------
+        
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        # --- NEW: Apply Squeeze-and-Excitation ---
+        # The block learns to weight these features (out)
+        out = self.se(out)
+        # -----------------------------------------
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+        out = self.relu(out)
+
+        return out
 
 
 class HABDataset(Dataset):
@@ -49,10 +152,10 @@ class HABDataset(Dataset):
         
         # Define the exact order of bands to ensure the 12-channel stack is consistent
         self.band_names = [
-            "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", "B05_raw.tif", "B06_raw.tif",
-            "B07_raw.tif", "B08_raw.tif", "B8A_raw.tif", "B11_raw.tif", "B12_raw.tif"
+            "B01_raw.tif", "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", 
+            "B05_raw.tif", "B06_raw.tif", "B07_raw.tif", "B08_raw.tif", 
+            "B8A_raw.tif", "B09_raw.tif", "B11_raw.tif", "B12_raw.tif"
         ]
-        
         
         # Map text labels to integers for the CNN
         self.label_map = {"Low": 0, "Moderate": 1, "High": 2}
@@ -118,44 +221,82 @@ class HABDataset(Dataset):
         # 3. Masking
         masked_data = self.apply_water_mask(bands_stack, scl)
         
-        # 4. Convert to Torch Tensor
-        tensor = torch.from_numpy(masked_data)
+                
+        # 4. Extract indices
+        # Band Mapping based on self.band_names list:
+        # 0:B01, 1:B02(Blue), 2:B03(Green), 3:B04(Red), 4:B05(RE1), 
+        # 7:B08(NIR), 10:B11(SWIR)
         
-        # 5. Resize from 365x365 to 256x256
+        # Add epsilon to avoid division by zero
+        eps = 1e-8
+        
+        b_blue  = masked_data[1]
+        b_green = masked_data[2]
+        b_red   = masked_data[3]
+        b_re1   = masked_data[4]
+        b_nir   = masked_data[7]
+        b_swir  = masked_data[10]
+
+        # 1. NDVI (Vegetation/Algae biomass)
+        ndvi = (b_nir - b_red) / (b_nir + b_red + eps)
+        
+        # 2. NDWI (McFeeters - Water body delineation)
+        ndwi = (b_green - b_nir) / (b_green + b_nir + eps)
+        
+        # 3. MNDWI (Modified NDWI - usually better for open water)
+        mndwi = (b_green - b_swir) / (b_green + b_swir + eps)
+        
+        # 4. NDCI (Normalized Difference Chlorophyll Index - CRITICAL for HAB)
+        ndci = (b_re1 - b_red) / (b_re1 + b_red + eps)
+        
+        # 5. NDre (Normalized Difference Red Edge - Good for vegetation stress/bloom)
+        ndre = (b_nir - b_re1) / (b_nir + b_re1 + eps)
+        
+        # 6. NDTI (Normalized Difference Turbidity Index - Requested)
+        ndti = (b_red - b_green) / (b_red + b_green + eps)
+        
+        # 7. SABI (Surface Algal Bloom Index - Requested)
+        sabi = (b_nir - b_red) / (b_blue + b_green + eps)
+        
+        # Stack indices: Shape becomes (7, 365, 365)
+        indices_stack = np.stack([ndvi, ndwi, mndwi, ndci, ndre, ndti, sabi], axis=0)
+        
+        # Concatenate with raw data: Shape becomes (19, 365, 365)
+        # We assume masked_data is already float32.
+        full_stack = np.concatenate([masked_data, indices_stack], axis=0)
+
+        # 5. Convert to Torch Tensor
+        tensor = torch.from_numpy(full_stack)
+        
+        # 6. Resize from 365x365 to 256x256
         # (Using unsqueeze because interpolate expects a batch dimension)
         tensor = tensor.unsqueeze(0) 
         tensor = torch.nn.functional.interpolate(
             tensor, size=(256, 256), mode='bilinear', align_corners=False
         ).squeeze(0)
         
-        # 6. Normalization
+        # 7. Normalization
         # Divide by 10,000 to bring Sentinel-2 DN values to roughly 0-1
         tensor = tensor / 10000.0
         
-        # 7. Augmentation (Only for training!)
+        # 8. Augmentation (Only for training!)
         if self.mode == 'training':
             tensor = self.apply_augmentations(tensor)
             
         return tensor, label
 
-
+    
 class HABLightningModel(L.LightningModule):
     def __init__(self, mode='generic', weights_path=None, lr=1e-4):
         super().__init__()
-        # Save hyperparameters so they are logged and accessible
         self.save_hyperparameters()
         
-        # 1. Build the Architecture with the Surgery logic
+        # 1. Build the CUSTOM Architecture
         self.model = self._build_model(self.hparams.mode, self.hparams.weights_path)
         
-        # 2. Loss Function
+        # 2. Loss Function & Metrics (Same as before)
         self.criterion = nn.CrossEntropyLoss()
         
-        # 3. Define Weights: [Low, Moderate, High]
-        # We increase Moderate to 2.0 to force the model to prioritize its errors.
-        #self.register_buffer("class_weights", torch.tensor([1.1, 2.0, 0.8]))
-        
-        # 3. Metrics Setup (Accuracy, F1, and Per-Class)
         def get_metrics(prefix):
             return torchmetrics.MetricCollection({
                 'acc': MulticlassAccuracy(num_classes=3, average='macro'),
@@ -168,91 +309,126 @@ class HABLightningModel(L.LightningModule):
 
         self.train_metrics = get_metrics('train_')
         self.val_metrics = get_metrics('val_')
-
+        
     def _build_model(self, mode, weights_path):
-        # Start with a "raw" ResNet18 structure
-        model = models.resnet18(weights=None)
+        # 1. Manually build ResNet with our custom SEBasicBlock
+        model = ResNet(block=SEBasicBlock, layers=[2, 2, 2, 2])
         
-        # Step A: Stem Surgery (Change input from 3 to 12 channels)
-        # We define a new conv1 with 12 input filters
-        model.conv1 = nn.Conv2d(10, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        #Input Channels to 19 (12 Bands + 7 Indices) ---
+        input_channels = 19
+
+        # 2. Stem Surgery (Initialize conv1 with 19 channels)
+        model.conv1 = nn.Conv2d(input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
         
+        # --- MODE A: GENERIC (ImageNet) ---
         if mode == 'generic':
-            # Option A: Inflate ImageNet weights
-            print("Mode: Generic - Inflating ImageNet weights to 12 channels...")
+            print(f"Mode: Generic - Inflating ImageNet weights to {input_channels} channels...")
             temp_resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+            
             with torch.no_grad():
-                # Average the RGB weights and repeat for 12 bands
+                # Average RGB weights to create N-channel weights
                 w_avg = temp_resnet.conv1.weight.mean(dim=1, keepdim=True)
-                model.conv1.weight.copy_(w_avg.repeat(1, 12, 1, 1))
-            # Load the rest of the pretrained body (layers after conv1)
+                model.conv1.weight.copy_(w_avg.repeat(1, input_channels, 1, 1))
+            
+            # Load body, skipping SE layers (random init)
             state_dict = temp_resnet.state_dict()
             del state_dict['conv1.weight']
             model.load_state_dict(state_dict, strict=False)
-                
+
+        # --- MODE B: S2 (SSL4EO) ---
         elif mode == 's2':
-            # Option B: Load Sentinel-2 SSL4EO weights
             print(f"Mode: S2 - Performing weight surgery on {weights_path}...")
             state_dict = torch.load(weights_path, map_location='cpu')
             if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
             
-            # Key cleaning (stripping 'backbone.' or 'module.' prefixes)
             new_state_dict = {}
             for k, v in state_dict.items():
                 name = k.replace('module.', '').replace('backbone.', '')
                 
-                # Check for the first layer weights
+                # Weight Expansion (12 -> 19) ---
                 if name == 'conv1.weight' and v.shape[1] == 13:
-                    # THE SURGERY: Keep indices 0-9 (B01-B09, incl B8A) 
-                    # and skip 10 (B10), then keep 11-12 (B11-B12)
+                    # 1. Extract the standard 12 bands (Drop B10)
                     keep_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]
-                    v = v[:, keep_indices, :, :]
-                
-                new_state_dict[name] = v
+                    w_spectral = v[:, keep_indices, :, :] # Shape: [64, 12, 7, 7]
+                    
+                    # 2. Create weights for the 7 new indices
+                    # We initialize them as the average of the spectral bands
+                    w_mean = w_spectral.mean(dim=1, keepdim=True) # Shape: [64, 1, 7, 7]
+                    w_indices = w_mean.repeat(1, 7, 1, 1)         # Shape: [64, 7, 7, 7]
+                    
+                    # 3. Concatenate to get 19 channels
+                    w_total = torch.cat([w_spectral, w_indices], dim=1) # Shape: [64, 19, 7, 7]
+                    
+                    new_state_dict[name] = w_total
+                else:
+                    new_state_dict[name] = v
             
-            # Load everything we cleaned. strict=False allows the 3-class FC layer to stay random.
+            # Load weights, skipping SE layers (random init)
             model.load_state_dict(new_state_dict, strict=False)
-            
+
+        # --- MODE C: BIGEARTHNET ---
         elif mode == 'bigearthnet':
             print(f"Mode: BigEarthNet - Loading Pretrained Weights from {weights_path}...")
             
-            # Load the file
             if weights_path.endswith('.safetensors'):
+                from safetensors.torch import load_file
                 state_dict = load_file(weights_path)
             else:
                 state_dict = torch.load(weights_path, map_location='cpu')
             
-            # Handling nested dictionaries (common in HF/PyTorch)
             if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
             elif 'model_state_dict' in state_dict: state_dict = state_dict['model_state_dict']
             
-            # Key Cleaning (Removing prefixes like 'module.' or 'backbone.')
             new_state_dict = {}
             for k, v in state_dict.items():
-                # We strip "model.vision_encoder." because your inspection showed it!
                 name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '')
-                if "fc." in name:
+                
+                # Handle Conv1 Expansion (10 -> 19)
+                if "conv1.weight" in name and v.shape[1] == 10:
+                    w_spectral = v # [64, 10, 7, 7]
+                    # Create 9 new channels (to reach 19) using average
+                    w_mean = w_spectral.mean(dim=1, keepdim=True)
+                    w_new = w_mean.repeat(1, 9, 1, 1) 
+                    w_total = torch.cat([w_spectral, w_new], dim=1)
+                    new_state_dict[name] = w_total
                     continue
+
+                if "fc." in name: continue # Skip head
                 new_state_dict[name] = v
             
-            # Load the weights
-            # Now that shapes match (10 vs 10) and names match (conv1 vs conv1), 
-            # this will SUCCEED in loading the weights.
-            missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-            
-            print("Weights Loaded.") 
-            # Verification: Check if conv1.weight is in the 'missing' list.
-            if 'conv1.weight' in missing:
-                print("CRITICAL WARNING: conv1.weight was NOT loaded! Check names again.")
-            else:
-                print("SUCCESS: conv1.weight loaded successfully!")
-            
-        # Step B: Head Surgery (Change output from 1000 to 3 classes)
+            # Load weights, skipping SE layers (random init)
+            model.load_state_dict(new_state_dict, strict=False)
+
+        # Step C: Head Surgery (Change output to 3 classes)
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, 3)
         
         return model
+    
+    def freeze_backbone(self):
+        print("Freezing ResNet backbone (Conv layers)...")
+        for name, param in self.model.named_parameters():
+            # Freeze everything
+            param.requires_grad = False
+            
+            # Unfreeze SE Blocks
+            if "se." in name:
+                param.requires_grad = True
+            
+            # Unfreeze Head (fc)
+            if "fc." in name:
+                param.requires_grad = True
+                
+            # Unfreeze the very first layer (conv1) because we did surgery on it
+            # It needs to adapt 12->19 channels fast
+            if "conv1." in name:
+                param.requires_grad = True
 
+    def unfreeze_all(self):
+        print("Unfreezing entire model...")
+        for param in self.model.parameters():
+            param.requires_grad = True    
+    
     def forward(self, x):
         return self.model(x)
 
@@ -287,7 +463,7 @@ class HABLightningModel(L.LightningModule):
         self.log_dict(output)
         self.val_metrics.reset()
     
-       
+     
     def configure_optimizers(self):
         # 1. Use self.hparams.lr to grab the value you passed in __init__
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -314,6 +490,16 @@ class HABLightningModel(L.LightningModule):
         # Using AdamW as it is better for transformers/modern CNNs
         return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
     '''
+
+class UnfreezeCallback(L.Callback):
+    def on_fit_start(self, trainer, pl_module):
+        # Freeze at the very beginning
+        pl_module.freeze_backbone()
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        # Unfreeze after Epoch 4 (so starting Epoch 5, everything trains)
+        if trainer.current_epoch == 4:
+            pl_module.unfreeze_all()
 
 def prepare_dataset_registry_and_split(excel_path, data_root, output_registry_path):
     """
@@ -487,7 +673,7 @@ if __name__ == "__main__":
     EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
     DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
     registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18\results10"
+    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_7_extra_indices\results8"
     Logger_path = output_path
     batch_size = 32
     num_workers = 8
@@ -504,9 +690,8 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
 
     # --- 2. SETUP MODEL & LOGGER ---
-    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
-    #model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path=r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0\model.safetensors")
+    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
+    model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
     
     logger = CSVLogger(output_path, name="hab_experiment")
     
@@ -521,15 +706,17 @@ if __name__ == "__main__":
     # 2. Define Early Stopping (Stops training if no improvement)
     early_stop_callback = EarlyStopping(
         monitor="val_f1",  # Watch the F1 score
-        patience=20,       # Wait 10 epochs for an improvement before stopping
+        patience=15,       # Wait 10 epochs for an improvement before stopping
         mode="max",        # Higher is better
         verbose=True       # Print a message when it stops
-    )    
+    )  
+    
+    unfreeze_callback = UnfreezeCallback()
 
     print("\n--- Model Summary ---")
     # Input size: (Batch_Size, Channels, Height, Width)
     # We use Batch=batch_size, Channels=12, Size=256x256
-    summary(model, input_size=(batch_size, 10, 256, 256))
+    summary(model, input_size=(batch_size, 19, 256, 256))
 
     print("\n--- Generating Architecture Diagram ---")
     if not os.path.exists(output_path):
@@ -538,7 +725,7 @@ if __name__ == "__main__":
         # This creates a visual graph of the flow
         model_graph = draw_graph(
             model, 
-            input_size=(batch_size, 10, 256, 256), 
+            input_size=(batch_size, 19, 256, 256), 
             expand_nested=True,
             graph_name='HAB_ResNet18_Arch',
             save_graph=True,  # Saves a PDF/PNG
@@ -548,15 +735,15 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Skipping visualization (Graphviz not found or error): {e}")
 
-
     trainer = L.Trainer(
-        max_epochs=60,             # Increased for generic mode
+        max_epochs=65,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
         precision="32-true",
         gradient_clip_val=1.0,
         logger=logger,
-        callbacks=[checkpoint_callback, early_stop_callback], # Ensure early_stop is here!
+        #callbacks=[checkpoint_callback, early_stop_callback]
+        callbacks=[checkpoint_callback, early_stop_callback, unfreeze_callback], # Ensure early_stop is here!
         log_every_n_steps=10       # This is fine, leave it.
     )
     
