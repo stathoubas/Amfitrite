@@ -32,7 +32,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torchinfo import summary
 from torchview import draw_graph
 from pytorch_lightning.callbacks import EarlyStopping
-from safetensors.torch import load_file
+
 
 class HABDataset(Dataset):
     def __init__(self, dataframe, root_dir, mode='train'):
@@ -46,10 +46,11 @@ class HABDataset(Dataset):
         self.root_dir = root_dir
         self.mode = mode
         
-        # Define the exact order of bands to ensure the 10-channel stack is consistent
+        # Define the exact order of bands to ensure the 12-channel stack is consistent
         self.band_names = [
-            "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", "B05_raw.tif", "B06_raw.tif",
-            "B07_raw.tif", "B08_raw.tif", "B8A_raw.tif", "B11_raw.tif", "B12_raw.tif"
+            "B01_raw.tif", "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", 
+            "B05_raw.tif", "B06_raw.tif", "B07_raw.tif", "B08_raw.tif", 
+            "B8A_raw.tif", "B09_raw.tif", "B11_raw.tif", "B12_raw.tif"
         ]
         
         # Map text labels to integers for the CNN
@@ -57,21 +58,6 @@ class HABDataset(Dataset):
 
     def __len__(self):
         return len(self.df)
-
-    def apply_water_mask(self, bands_stack, scl_array):
-        """
-        Logic: SCL 6 is water, 7 is unclassified. 
-        for now use only water
-        Zeroes out everything else (Land, Clouds, etc.)
-        """
-        # Create a mask: 1.0 for water, 0.0 for others
-        #mask = np.isin(scl_array, [6, 7]).astype(np.float32)
-        mask = (scl_array == 6).astype(np.float32)
-        
-        # Multiply the whole 10-layer stack by the 2D mask
-        # Broadfasting handles applying the 2D mask to all 10 layers
-        masked_stack = bands_stack * mask
-        return masked_stack
 
     def apply_augmentations(self, tensor):
         """
@@ -100,24 +86,23 @@ class HABDataset(Dataset):
         folder_path = os.path.join(self.root_dir, uid)
         
         # 1. Load SCL for masking
-        with rasterio.open(os.path.join(folder_path, "SCL_raw.tif")) as src:
-            scl = src.read(1)
-            
-        # 2. Load all 10 bands
+        #removed
+        
+        # 2. Load all 12 bands
         band_data = []
         for b_name in self.band_names:
             with rasterio.open(os.path.join(folder_path, b_name)) as src:
                 # Read as float32 immediately for math
                 band_data.append(src.read(1).astype(np.float32))
         
-        # Stack into (10, 365, 365)
+        # Stack into (12, 365, 365)
         bands_stack = np.stack(band_data, axis=0)
         
         # 3. Masking
-        masked_data = self.apply_water_mask(bands_stack, scl)
+        #removed
         
         # 4. Convert to Torch Tensor
-        tensor = torch.from_numpy(masked_data)
+        tensor = torch.from_numpy(bands_stack)
         
         # 5. Resize from 365x365 to 256x256
         # (Using unsqueeze because interpolate expects a batch dimension)
@@ -179,9 +164,9 @@ class HABLightningModel(L.LightningModule):
         # Start with a "raw" ResNet18 structure
         model = models.resnet18(weights=None)
         
-        # Step A: Stem Surgery (Change input from 3 to 10 channels)
-        # We define a new conv1 with 10 input filters
-        model.conv1 = nn.Conv2d(10, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # Step A: Stem Surgery (Change input from 3 to 12 channels)
+        # We define a new conv1 with 12 input filters
+        model.conv1 = nn.Conv2d(12, 64, kernel_size=7, stride=2, padding=3, bias=False)
         
         if mode == 'generic':
             # Option A: Inflate ImageNet weights
@@ -218,40 +203,6 @@ class HABLightningModel(L.LightningModule):
             
             # Load everything we cleaned. strict=False allows the 3-class FC layer to stay random.
             model.load_state_dict(new_state_dict, strict=False)
-            
-        elif mode == 'bigearthnet':
-            print(f"Mode: BigEarthNet - Loading Pretrained Weights from {weights_path}...")
-            
-            # Load the file
-            if weights_path.endswith('.safetensors'):
-                state_dict = load_file(weights_path)
-            else:
-                state_dict = torch.load(weights_path, map_location='cpu')
-            
-            # Handling nested dictionaries (common in HF/PyTorch)
-            if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
-            elif 'model_state_dict' in state_dict: state_dict = state_dict['model_state_dict']
-            
-            # Key Cleaning (Removing prefixes like 'module.' or 'backbone.')
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                # We strip "model.vision_encoder." because your inspection showed it!
-                name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '')
-                if "fc." in name:
-                    continue
-                new_state_dict[name] = v
-            
-            # Load the weights
-            # Now that shapes match (10 vs 10) and names match (conv1 vs conv1), 
-            # this will SUCCEED in loading the weights.
-            missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-            
-            print("Weights Loaded.") 
-            # Verification: Check if conv1.weight is in the 'missing' list.
-            if 'conv1.weight' in missing:
-                print("CRITICAL WARNING: conv1.weight was NOT loaded! Check names again.")
-            else:
-                print("SUCCESS: conv1.weight loaded successfully!")
 
         # Step B: Head Surgery (Change output from 1000 to 3 classes)
         num_ftrs = model.fc.in_features
@@ -498,13 +449,14 @@ if __name__ == "__main__":
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {DEVICE}")
-    
+
+    """    
     # --- 1. SETUP DATA ---
     # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
     EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
     DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
     registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results5"
+    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results4"
     Logger_path = output_path
     batch_size = 32
     num_workers = 8
@@ -522,10 +474,33 @@ if __name__ == "__main__":
 
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
-    #model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path=r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0\model.safetensors")
+    model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
+    """
+    # --- 1. SETUP DATA ---
+    # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
+    EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
+    DATA_ROOT = "/home/kostas/AMFITRITE/data"
+    registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
+    output_path = "/home/kostas/AMFITRITE/res18_2classes/results7"
+    Logger_path = output_path
+    batch_size = 64
+    num_workers = 8
 
-    
+    df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
+
+    train_ds = HABDataset(df, DATA_ROOT, mode='training')
+    val_ds = HABDataset(df, DATA_ROOT, mode='validation')
+    test_ds = HABDataset(df, DATA_ROOT, mode='test')
+
+    # Batch Size 8 for 4GB GPU
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
+    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+
+    # --- 2. SETUP MODEL & LOGGER ---
+    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
+    #model = HABLightningModel(mode='s2', lr=1e-4, weights_path='/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth')
+
     logger = CSVLogger(output_path, name="hab_experiment")
     
     checkpoint_callback = ModelCheckpoint(
@@ -547,7 +522,7 @@ if __name__ == "__main__":
     print("\n--- Model Summary ---")
     # Input size: (Batch_Size, Channels, Height, Width)
     # We use Batch=batch_size, Channels=12, Size=256x256
-    summary(model, input_size=(batch_size, 10, 256, 256))
+    summary(model, input_size=(batch_size, 12, 256, 256))
 
     print("\n--- Generating Architecture Diagram ---")
     if not os.path.exists(output_path):
@@ -556,7 +531,7 @@ if __name__ == "__main__":
         # This creates a visual graph of the flow
         model_graph = draw_graph(
             model, 
-            input_size=(batch_size, 10, 256, 256), 
+            input_size=(batch_size, 12, 256, 256), 
             expand_nested=True,
             graph_name='HAB_ResNet18_Arch',
             save_graph=True,  # Saves a PDF/PNG
