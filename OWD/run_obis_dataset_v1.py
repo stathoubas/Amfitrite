@@ -166,10 +166,10 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
 if __name__ == "__main__":
     # Define Model Paths here
     MODEL_PATHS = {
-        "res18_scl":    "/vol/Amfitrite/CNNs_for_annotation/res18_scl/res18_scl.pth",
-        "res18_no_scl": "/vol/Amfitrite/CNNs_for_annotation/res18_no_scl/res18_no_scl.pth",
-        "convnext_scl": "/vol/Amfitrite/CNNs_for_annotation/convnext_scl/convnext_scl.pth",
-        "rdnet_no_scl": "/vol/Amfitrite/CNNs_for_annotation/rdnet_no_scl/rdnet_no_scl.pth"
+        "res18_scl":    "/vol/Amfitrite/CNNs_for_annotation/res18_scl/best_epoch_16.pth",
+        "res18_no_scl": "/vol/Amfitrite/CNNs_for_annotation/res18_no_scl/best_epoch_26.pth",
+        "convnext_scl": "/vol/Amfitrite/CNNs_for_annotation/convnext_scl/best_epoch_15.pth",
+        "rdnet_no_scl": "/vol/Amfitrite/CNNs_for_annotation/rdnet_no_scl/best_epoch_35.pthh"
     }
     
     # Set up Argparse so you can run it from the terminal easily
