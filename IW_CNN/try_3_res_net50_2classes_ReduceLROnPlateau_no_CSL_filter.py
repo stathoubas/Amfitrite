@@ -161,8 +161,8 @@ class HABLightningModel(L.LightningModule):
         self.val_metrics = get_metrics('val_')
 
     def _build_model(self, mode, weights_path):
-        # Start with a "raw" ResNet18 structure
-        model = models.resnet18(weights=None)
+        # Start with a "raw" ResNet50 structure
+        model = models.resnet50(weights=None)
         
         # Step A: Stem Surgery (Change input from 3 to 10 channels)
         # We define a new conv1 with 10 input filters
@@ -171,7 +171,7 @@ class HABLightningModel(L.LightningModule):
         if mode == 'generic':
             # Option A: Inflate ImageNet weights
             print("Mode: Generic - Inflating ImageNet weights to 12 channels...")
-            temp_resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+            temp_resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
             with torch.no_grad():
                 # Average the RGB weights and repeat for 12 bands
                 w_avg = temp_resnet.conv1.weight.mean(dim=1, keepdim=True)
@@ -513,7 +513,7 @@ if __name__ == "__main__":
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
-    output_path = "/home/kostas/AMFITRITE/res18_2classes/results10"
+    output_path = "/home/kostas/AMFITRITE/res50_2_classes/results6"
 
     Logger_path = output_path
     batch_size = 64
@@ -526,14 +526,14 @@ if __name__ == "__main__":
     test_ds = HABDataset(df, DATA_ROOT, mode='test')
 
     # Batch Size 8 for 4GB GPU
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True, pin_memory=True, prefetch_factor=4)
+    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True, pin_memory=True, prefetch_factor=4)
+    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True, pin_memory=True, prefetch_factor=4)
 
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
     #model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path="/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors")
+    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path="/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet50-s2-v0.2.0/model.safetensors")
 
     
     logger = CSVLogger(output_path, name="hab_experiment")
@@ -568,11 +568,11 @@ if __name__ == "__main__":
             model, 
             input_size=(batch_size, 10, 256, 256), 
             expand_nested=True,
-            graph_name='HAB_ResNet18_Arch',
+            graph_name='HAB_ResNet50_Arch',
             save_graph=True,  # Saves a PDF/PNG
             directory=output_path # Saves it into your plots folder
         )
-        print("Architecture diagram saved to 'plots/HAB_ResNet18_Arch.gv.pdf'")
+        print("Architecture diagram saved to 'plots/HAB_ResNet50_Arch.gv.pdf'")
     except Exception as e:
         print(f"Skipping visualization (Graphviz not found or error): {e}")
 

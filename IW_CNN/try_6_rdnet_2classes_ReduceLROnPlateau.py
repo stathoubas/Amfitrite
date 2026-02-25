@@ -12,7 +12,6 @@ from sklearn.model_selection import train_test_split
 import rasterio
 import torch
 import torch.nn as nn
-from torchvision import models
 import numpy as np
 from torch.utils.data import Dataset
 import torchvision.transforms.functional as TF
@@ -32,9 +31,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from torchinfo import summary
 from torchview import draw_graph
 from pytorch_lightning.callbacks import EarlyStopping
-from safetensors.torch import load_file
-
-
+import timm
 class HABDataset(Dataset):
     def __init__(self, dataframe, root_dir, mode='train'):
         """
@@ -47,7 +44,7 @@ class HABDataset(Dataset):
         self.root_dir = root_dir
         self.mode = mode
         
-        # Define the exact order of bands to ensure the 12-channel stack is consistent
+        # Define the exact order of bands to ensure the 10-channel stack is consistent
         self.band_names = [
             "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", "B05_raw.tif", "B06_raw.tif",
             "B07_raw.tif", "B08_raw.tif", "B8A_raw.tif", "B11_raw.tif", "B12_raw.tif"
@@ -58,6 +55,21 @@ class HABDataset(Dataset):
 
     def __len__(self):
         return len(self.df)
+
+    def apply_water_mask(self, bands_stack, scl_array):
+        """
+        Logic: SCL 6 is water, 7 is unclassified. 
+        for now use only water
+        Zeroes out everything else (Land, Clouds, etc.)
+        """
+        # Create a mask: 1.0 for water, 0.0 for others
+        #mask = np.isin(scl_array, [6, 7]).astype(np.float32)
+        mask = (scl_array == 6).astype(np.float32)
+        
+        # Multiply the whole 10-layer stack by the 2D mask
+        # Broadfasting handles applying the 2D mask to all 10 layers
+        masked_stack = bands_stack * mask
+        return masked_stack
 
     def apply_augmentations(self, tensor):
         """
@@ -86,23 +98,24 @@ class HABDataset(Dataset):
         folder_path = os.path.join(self.root_dir, uid)
         
         # 1. Load SCL for masking
-        #removed
-        
-        # 2. Load all 12 bands
+        with rasterio.open(os.path.join(folder_path, "SCL_raw.tif")) as src:
+            scl = src.read(1)
+            
+        # 2. Load all 10 bands
         band_data = []
         for b_name in self.band_names:
             with rasterio.open(os.path.join(folder_path, b_name)) as src:
                 # Read as float32 immediately for math
                 band_data.append(src.read(1).astype(np.float32))
         
-        # Stack into (12, 365, 365)
+        # Stack into (10, 365, 365)
         bands_stack = np.stack(band_data, axis=0)
         
         # 3. Masking
-        #removed
+        masked_data = self.apply_water_mask(bands_stack, scl)
         
         # 4. Convert to Torch Tensor
-        tensor = torch.from_numpy(bands_stack)
+        tensor = torch.from_numpy(masked_data)
         
         # 5. Resize from 365x365 to 256x256
         # (Using unsqueeze because interpolate expects a batch dimension)
@@ -121,14 +134,12 @@ class HABDataset(Dataset):
             
         return tensor, label
 
-
 class HABLightningModel(L.LightningModule):
     def __init__(self, mode='generic', weights_path=None, lr=1e-4):
         super().__init__()
-        # Save hyperparameters so they are logged and accessible
         self.save_hyperparameters()
         
-        # 1. Build the Architecture with the Surgery logic
+        # 1. Build the ConvNeXt Architecture
         self.model = self._build_model(self.hparams.mode, self.hparams.weights_path)
                 
         # 2. Define Weights: [Low, Bloom]
@@ -137,20 +148,12 @@ class HABLightningModel(L.LightningModule):
         # 3. Loss Function
         self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
         
-        
-        # 3. Metrics Setup (Accuracy, F1, and Per-Class)
+        # 4. Metrics Setup
         def get_metrics(prefix):
             return torchmetrics.MetricCollection({
-                # Standard Accuracy (biased towards majority)
                 'acc': MulticlassAccuracy(num_classes=2, average='micro'),
-                
-                # Balanced Accuracy (Fair average of Recall_Low and Recall_Bloom)
                 'bal_acc': MulticlassAccuracy(num_classes=2, average='macro'),
-                
-                # Macro F1 (The gold standard for stopping)
                 'f1': MulticlassF1Score(num_classes=2, average='macro'),
-                
-                # Per-class breakdown
                 'per_class': ClasswiseWrapper(
                     MulticlassAccuracy(num_classes=2, average=None),
                     labels=["Low", "Bloom"]
@@ -161,87 +164,51 @@ class HABLightningModel(L.LightningModule):
         self.val_metrics = get_metrics('val_')
 
     def _build_model(self, mode, weights_path):
-        # Start with a "raw" ResNet18 structure
-        model = models.resnet18(weights=None)
+        print(f"--- Building RDNet Base (Mode: {mode}) ---")
         
-        # Step A: Stem Surgery (Change input from 3 to 10 channels)
-        # We define a new conv1 with 10 input filters
-        model.conv1 = nn.Conv2d(10, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # 1. Create RDNet Skeleton
+        # 'rdnet_base' is the correct timm model name for BIFOLD weights
+        model = timm.create_model(
+            'rdnet_base', 
+            pretrained=False, 
+            num_classes=2, 
+            in_chans=10
+        )
         
-        if mode == 'generic':
-            # Option A: Inflate ImageNet weights
-            print("Mode: Generic - Inflating ImageNet weights to 12 channels...")
-            temp_resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-            with torch.no_grad():
-                # Average the RGB weights and repeat for 12 bands
-                w_avg = temp_resnet.conv1.weight.mean(dim=1, keepdim=True)
-                model.conv1.weight.copy_(w_avg.repeat(1, 12, 1, 1))
-            # Load the rest of the pretrained body (layers after conv1)
-            state_dict = temp_resnet.state_dict()
-            del state_dict['conv1.weight']
-            model.load_state_dict(state_dict, strict=False)
-                
-        elif mode == 's2':
-            # Option B: Load Sentinel-2 SSL4EO weights
-            print(f"Mode: S2 - Performing weight surgery on {weights_path}...")
-            state_dict = torch.load(weights_path, map_location='cpu')
-            if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
+        if mode == 'bigearthnet':
+            print(f"Loading Pretrained Weights from {weights_path}...")
             
-            # Key cleaning (stripping 'backbone.' or 'module.' prefixes)
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                name = k.replace('module.', '').replace('backbone.', '')
-                
-                # Check for the first layer weights
-                if name == 'conv1.weight' and v.shape[1] == 13:
-                    # THE SURGERY: Keep indices 0-9 (B01-B09, incl B8A) 
-                    # and skip 10 (B10), then keep 11-12 (B11-B12)
-                    keep_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]
-                    v = v[:, keep_indices, :, :]
-                
-                new_state_dict[name] = v
-            
-            # Load everything we cleaned. strict=False allows the 3-class FC layer to stay random.
-            model.load_state_dict(new_state_dict, strict=False)
-            
-        elif mode == 'bigearthnet':
-            print(f"Mode: BigEarthNet - Loading Pretrained Weights from {weights_path}...")
-            
-            # Load the file
             if weights_path.endswith('.safetensors'):
+                from safetensors.torch import load_file
                 state_dict = load_file(weights_path)
             else:
                 state_dict = torch.load(weights_path, map_location='cpu')
             
-            # Handling nested dictionaries (common in HF/PyTorch)
             if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
             elif 'model_state_dict' in state_dict: state_dict = state_dict['model_state_dict']
             
-            # Key Cleaning (Removing prefixes like 'module.' or 'backbone.')
             new_state_dict = {}
             for k, v in state_dict.items():
-                # We strip "model.vision_encoder." because your inspection showed it!
                 name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '')
-                if "fc." in name:
+                
+                # Skip Head
+                # RDNet usually uses 'head.fc.weight' or just 'fc.weight'
+                if "head." in name or "fc." in name:
                     continue
+                
                 new_state_dict[name] = v
             
-            # Load the weights
-            # Now that shapes match (10 vs 10) and names match (conv1 vs conv1), 
-            # this will SUCCEED in loading the weights.
+            # Load weights
             missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
             
             print("Weights Loaded.") 
-            # Verification: Check if conv1.weight is in the 'missing' list.
-            if 'conv1.weight' in missing:
-                print("CRITICAL WARNING: conv1.weight was NOT loaded! Check names again.")
+            # Verification: Check if stem (first layer) loaded
+            # RDNet usually starts with 'stem.0.weight' or 'stem.conv.weight'
+            if 'stem.0.weight' in missing and 'stem.conv.weight' in missing:
+                print("CRITICAL WARNING: Stem weights were NOT loaded!")
             else:
-                print("SUCCESS: conv1.weight loaded successfully!")
+                print("SUCCESS: RDNet Weights loaded!")
 
-        # Step B: Head Surgery (Change output from 1000 to 3 classes)
-        num_ftrs = model.fc.in_features
-        model.fc = nn.Linear(num_ftrs, 2)
-        
         return model
 
     def forward(self, x):
@@ -484,56 +451,39 @@ if __name__ == "__main__":
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {DEVICE}")
     
-    ## --- 1. SETUP DATA ---
-    ## Ensure Block 1 functions (prepare_dataset...) are defined above or imported
+    # --- 1. SETUP DATA ---
+    # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
     #EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
     #DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
-    ##registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    #output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results5"
+    #registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
+    #output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\convnextv2_base\results1"
+    #weights_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\BIFOLD-BigEarthNetv2-0convnextv2_base-s2-v0.2.0\model.safetensors"
     #Logger_path = output_path
-    #batch_size = 32
+    #batch_size = 16
     #num_workers = 8
-    #
-    #df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
-    #
-    #train_ds = HABDataset(df, DATA_ROOT, mode='training')
-    #val_ds = HABDataset(df, DATA_ROOT, mode='validation')
-    #test_ds = HABDataset(df, DATA_ROOT, mode='test')
-    #
-    ## Batch Size 8 for 4GB GPU
-    #train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
-    #val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    #test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    #
-    ## --- 2. SETUP MODEL & LOGGER ---
-    ##model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
-    ##model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    #model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path=r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0\model.safetensors")
-
+    
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
-    output_path = "/home/kostas/AMFITRITE/res18_2classes/results10"
-
+    output_path = "/home/kostas/AMFITRITE/rdnet_base/results1"
+    weights_path = "/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0rdnet_base-s2-v0.2.0/model.safetensors"
     Logger_path = output_path
-    batch_size = 64
-    num_workers = 8
+    batch_size = 8
+    num_workers = 4
 
     df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
-
+    
     train_ds = HABDataset(df, DATA_ROOT, mode='training')
     val_ds = HABDataset(df, DATA_ROOT, mode='validation')
     test_ds = HABDataset(df, DATA_ROOT, mode='test')
-
+    
     # Batch Size 8 for 4GB GPU
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
+    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True, pin_memory=True)#, prefetch_factor=4)
+    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True, pin_memory=True)#, prefetch_factor=4)
+    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True, pin_memory=True)#, prefetch_factor=4)
 
     # --- 2. SETUP MODEL & LOGGER ---
-    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
-    #model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path="/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors")
+    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path=weights_path)
 
     
     logger = CSVLogger(output_path, name="hab_experiment")
@@ -556,7 +506,6 @@ if __name__ == "__main__":
 
     print("\n--- Model Summary ---")
     # Input size: (Batch_Size, Channels, Height, Width)
-    # We use Batch=batch_size, Channels=12, Size=256x256
     summary(model, input_size=(batch_size, 10, 256, 256))
 
     print("\n--- Generating Architecture Diagram ---")
@@ -568,7 +517,7 @@ if __name__ == "__main__":
             model, 
             input_size=(batch_size, 10, 256, 256), 
             expand_nested=True,
-            graph_name='HAB_ResNet18_Arch',
+            graph_name='convnextv2_base',
             save_graph=True,  # Saves a PDF/PNG
             directory=output_path # Saves it into your plots folder
         )
@@ -589,10 +538,11 @@ if __name__ == "__main__":
     )
     '''
     trainer = L.Trainer(
-        max_epochs=60,             # Increased for generic mode
+        max_epochs=100,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
-        precision="32-true",
+        precision="16-mixed", #"32-true",
+        accumulate_grad_batches=2,
         gradient_clip_val=1.0,
         logger=logger,
         callbacks=[checkpoint_callback, early_stop_callback], # Ensure early_stop is here!
