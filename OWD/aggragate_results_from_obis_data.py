@@ -48,7 +48,7 @@ def aggregate_pipeline_results(input_csv_path_name, output_root, final_output_cs
     df_main["HAB_Tiles_Sorted"] = ""
     df_main["Max_Check_Index"] = np.nan
     df_main["Check_Tiles_Sorted"] = ""
-    df_main["Index_per_Tile"] = np.nan
+    df_main["Index_per_Tile"] = ""
     
     # Get all folders currently in the output root
     existing_folders = os.listdir(output_root) if os.path.exists(output_root) else []
