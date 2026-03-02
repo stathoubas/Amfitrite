@@ -65,7 +65,7 @@ def aggregate_pipeline_results(input_csv_path_name, output_root, final_output_cs
             df_main.at[idx, "Status"] = "No folder found"
             continue
             
-        if not len(matched_folders) > 1:
+        if len(matched_folders) > 1:
             df_main.at[idx, "Status"] = "multiple folders"
             continue
         
