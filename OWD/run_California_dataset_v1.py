@@ -76,7 +76,8 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
     # Initialize the CSV report file with the NEW CLASSIFICATION COLUMNS
     csv_headers = [
         "case_id", "date", "status", "failed_stage", "error_message", "output_folder",
-        "Overall_Class", "Max_HAB_Index", "HAB_Tiles_Sorted", "Max_Check_Index", "Check_Tiles_Sorted"
+        "Overall_Class", "Max_HAB_Index", "HAB_Tiles_Sorted", "Max_Check_Index", "Check_Tiles_Sorted",
+        "Index_per_Tile"
     ]
     with open(log_csv_path, mode=log_file_mode, newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
@@ -134,6 +135,7 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
         hab_tiles_sorted = ""
         max_chk_idx = ""
         chk_tiles_sorted = ""
+        all_tiles = ""
         
         try:
             failed_stage = "1_Search_and_Select"
@@ -152,19 +154,19 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
                 
                 # Apply cloud logic based on attempt
                 if attempt == 1:
-                    candidates = items_df[items_df.per_clouds < 7.5]
+                    candidates = items_df
                 else:
                     # After attempt 1, enforce > 0.5% clouds to avoid black glitches
-                    candidates = items_df[(items_df.per_clouds > 0.5) & (items_df.per_clouds < 7.5)]
+                    candidates = items_df[(items_df.per_clouds > 0.5)]
                 
                 # Filter out ones we already tried
                 candidates = candidates[~candidates.index.isin(tried_indices)]
                 
                 if candidates.empty:
                     if attempt == 1:
-                        raise ValueError("No items found with < 7.5% clouds.")
+                        raise ValueError("No items")
                     else:
-                        raise ValueError("No items left with 0.5% - 7.5% clouds.")
+                        raise ValueError("No items left with > 0.5%  clouds.")
                         
                 # Pick the best available
                 best_row = candidates.sort_values(by="per_clouds", ascending=True).iloc[0]
@@ -239,6 +241,7 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
                 else:
                     hab_list = []
                     check_list = []
+                    indices_list = []
                     clean_count = 0
                     
                     for _, tile in valid_tiles.iterrows():
@@ -264,7 +267,9 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
                         cyfi_mass = cyfi_high + (0.5 * cyfi_mod)
                         cyfi_score = (cyfi_mass / 676.0) * 40.0
                         
-                        total_index = round(cnn_score + cyfi_score, 2)
+                        total_index = round(cnn_score + cyfi_score, 2) 
+                        
+                        indices_list.append((tile_name, total_index))
                         
                         # Apply Classification Logic
                         is_hab = rdnet_yes and (yes_count >= 2) and (cyfi_high >= 20)
@@ -291,6 +296,9 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
                         chk_tiles_sorted = " | ".join([f"{name} ({score})" for name, score in check_list])
                     elif clean_count > 0:
                         overall_class = "Clean"
+                        
+                    if indices_list:
+                        all_tiles = " | ".join([f"{name} ({score})" for name, score in indices_list])
             
             failed_stage = "None" 
             logging.info(f"Successfully completed {uid} | Class: {overall_class}")
@@ -305,7 +313,8 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
             # Write everything immediately to CSV
             row_data = [
                 case_id, date_str, status, failed_stage, error_msg, out_folder_path,
-                overall_class, max_hab_idx, hab_tiles_sorted, max_chk_idx, chk_tiles_sorted
+                overall_class, max_hab_idx, hab_tiles_sorted, max_chk_idx, chk_tiles_sorted,
+                indices_list
             ]
             with open(log_csv_path, mode='a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
@@ -317,4 +326,15 @@ def run_automated_pipeline(csv_path, output_root, model_paths):
 
 if __name__ == "__main__":
     MODEL_PATHS = {
-        "res18_scl":    "/vol/Amfit
+        "res18_scl":    "/vol/Amfitrite/CNNs_for_annotation/res18_scl/best_epoch_16.pth",
+        "res18_no_scl": "/vol/Amfitrite/CNNs_for_annotation/res18_no_scl/best_epoch_26.pth",
+        "convnext_scl": "/vol/Amfitrite/CNNs_for_annotation/convnext_scl/best_epoch_15.pth",
+        "rdnet_no_scl": "/vol/Amfitrite/CNNs_for_annotation/rdnet_no_scl/best_epoch_35.pth"
+    }
+    
+    parser = argparse.ArgumentParser(description="Automated HAB Satellite Pipeline")
+    parser.add_argument("--input", type=str, required=True, help="Path to the input CSV/Excel file")
+    parser.add_argument("--output", type=str, required=True, help="Path to the root output folder")
+    args = parser.parse_args()
+    
+    run_automated_pipeline(args.input, args.output, MODEL_PATHS)
