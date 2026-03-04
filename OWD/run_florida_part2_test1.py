@@ -196,7 +196,7 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
 
             # --- STAGE 5: Summarize ---
             failed_stage = "5_Folder_Summary"
-            df_summary = folder_summary(out_folder_path, add_images_to_excel=True)
+            df_summary = folder_summary(out_folder_path, add_images_to_excel=False)
             
             # --- STAGE 6: INLINE CLASSIFICATION & SCORING ---
             failed_stage = "6_Classification"
