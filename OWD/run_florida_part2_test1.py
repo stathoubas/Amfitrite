@@ -5,6 +5,12 @@ Created on Wed Mar  4 23:29:11 2026
 @author: K. Pikounis
 """
 
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Mar  3 13:23:32 2026
+
+@author: K. Pikounis
+"""
 
 import pandas as pd
 import os
@@ -106,7 +112,6 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
     
     # 3. Process Row by Row
     for index, row in df.iterrows():
-        # Clean ID
         case_id = str(row.get('id_x', f"Row_{index}")).replace(":", "_")
         
         # Ensure there is a valid satellite item assigned from Phase 1
@@ -128,9 +133,10 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
             logging.error(f"Row {index} ({case_id}): Invalid or missing Lat/Lon. Skipping.")
             continue
             
-        raw_date = str(row.get('Event_Date'))
+        # Safely grab the date (checks both variations seen in your files)
+        raw_date = row.get('Event_Date') if pd.notna(row.get('Event_Date')) else row.get('eventDate')
         try:
-            parsed_date = pd.to_datetime(raw_date)
+            parsed_date = pd.to_datetime(str(raw_date))
             date_str = parsed_date.strftime("%Y-%m-%d")
         except Exception as e:
             logging.error(f"Row {index} ({case_id}): Invalid Date format '{raw_date}'. Skipping.")
