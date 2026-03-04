@@ -74,7 +74,6 @@ def check_scl_water(item, lat, lon):
 
 def search_stac(lat, lon, target_date, y_days):
     """Searches PC for Sentinel-2 items within +- Y days, < 50% clouds."""
-    # Approximate 10km buffer for STAC geometry intersection
     buffer_deg = 0.1 
     bbox = [lon - buffer_deg, lat - buffer_deg, lon + buffer_deg, lat + buffer_deg]
     
@@ -100,15 +99,18 @@ def run_prescreener(csv_path, output_dir, x_days, y_days):
     logging.info(f"Loading dataset: {csv_path}")
     df = pd.read_csv(csv_path) if csv_path.endswith('.csv') else pd.read_excel(csv_path)
     
-    # Initialize new columns if they don't exist
+    # Initialize columns and parse dates/numbers safely
     if 'sat_item' not in df.columns: df['sat_item'] = ""
     if 'removed_by_idx' not in df.columns: df['removed_by_idx'] = ""
     
-    df['Event_Date'] = pd.to_datetime(df['eventDate'], errors='coerce') # Ensure correct date col name
+    df['Event_Date'] = pd.to_datetime(df['eventDate'], errors='coerce') 
+    
+    # Create a safe numeric column for math comparisons (replace errors with 0)
+    df['qty_numeric'] = pd.to_numeric(df['organismQuantity'], errors='coerce').fillna(0)
     
     # 1. Get HAB targets, sorted by highest organismQuantity
     hab_mask = (df['is_HAB'].str.strip().str.upper() == 'YES')
-    df_habs = df[hab_mask].sort_values(by='organismQuantity', ascending=False)
+    df_habs = df[hab_mask].sort_values(by='qty_numeric', ascending=False)
     
     habs_processed = 0
     
@@ -122,7 +124,7 @@ def run_prescreener(csv_path, output_dir, x_days, y_days):
         lat, lon = row['decimalLatitude'], row['decimalLongitude']
         date = row['Event_Date']
         
-        logging.info(f"\nEvaluating HAB {current_id} | Qty: {row['organismQuantity']} | Date: {date.date()}")
+        logging.info(f"\n{'='*50}\nEvaluating HAB {current_id} | Qty: {row['qty_numeric']} | Date: {date.date()}")
         
         # 2. Search for satellite image (+- Y days)
         items = search_stac(lat, lon, date, y_days)
@@ -143,24 +145,40 @@ def run_prescreener(csv_path, output_dir, x_days, y_days):
         
         # 3. Suppress all other HABs within 7680m and +- X days
         dist_mask = haversine_distance(lat, lon, df['decimalLatitude'], df['decimalLongitude']) <= 7680
-        time_mask = abs(df['Event_Date'] - date).dt.days <= x_days
+        hab_time_mask = abs(df['Event_Date'] - date).dt.days <= x_days
         
-        # Apply suppression to OTHER HABs
-        suppress_hab_mask = dist_mask & time_mask & (df['is_HAB'].str.strip().str.upper() == 'YES') & (df.index != idx)
+        suppress_hab_mask = dist_mask & hab_time_mask & (df['is_HAB'].str.strip().str.upper() == 'YES') & (df.index != idx)
         df.loc[suppress_hab_mask, 'removed_by_idx'] = current_id
-        logging.info(f"  Suppressed {suppress_hab_mask.sum()} neighboring HAB points.")
+        logging.info(f"  Suppressed {suppress_hab_mask.sum()} neighboring HAB points in the X-day window.")
         
         # 4. Find the Paired Non-HAB candidate
-        # Must be in same 7680m, is_HAB == No, removed_by_idx is empty. Sort by lowest quantity.
+        # Using the same spatial tile (dist_mask from the HAB's lat/lon)
         non_hab_mask = dist_mask & (df['is_HAB'].str.strip().str.upper() == 'NO') & \
                        (df['removed_by_idx'].isna() | (df['removed_by_idx'] == ""))
                        
-        df_non_habs = df[non_hab_mask].sort_values(by='organismQuantity', ascending=True)
+        df_non_habs = df[non_hab_mask].sort_values(by='qty_numeric', ascending=True)
         
         best_non_hab_item = None
         for nh_idx, nh_row in df_non_habs.iterrows():
-            logging.info(f"  Trying Non-HAB pair {nh_row['id_x']} | Qty: {nh_row['organismQuantity']}")
-            nh_items = search_stac(lat, lon, nh_row['Event_Date'], y_days)
+            logging.info(f"  Trying Non-HAB pair {nh_row['id_x']} | Qty: {nh_row['qty_numeric']}")
+            
+            nh_date = nh_row['Event_Date']
+            
+            # --- THE NEW PURITY CHECK ---
+            # Define the +- Y days window around this candidate's date
+            y_time_mask = abs(df['Event_Date'] - nh_date).dt.days <= y_days
+            neighborhood_mask = dist_mask & y_time_mask
+            
+            # Are there any contaminants? (qty > 10,000 OR explicitly labeled as YES HAB)
+            contaminants = df[neighborhood_mask & ((df['is_HAB'].str.strip().str.upper() == 'YES') | (df['qty_numeric'] > 10000))]
+            
+            if not contaminants.empty:
+                logging.info(f"    [!] Failed Purity Check: Found {len(contaminants)} contaminating samples in the +- {y_days} day window. Skipping.")
+                continue  # Go to the next lowest concentration candidate
+            # -----------------------------
+            
+            # If we reach here, the window is pure! Search STAC API.
+            nh_items = search_stac(lat, lon, nh_date, y_days)
             
             for nh_item in nh_items:
                 if check_scl_water(nh_item, lat, lon):
@@ -172,14 +190,14 @@ def run_prescreener(csv_path, output_dir, x_days, y_days):
                 df.at[nh_idx, 'sat_item'] = best_non_hab_item
                 df.at[nh_idx, 'removed_by_idx'] = current_id # Link it to the HAB that claimed it
                 
-                # Suppress other Non-HABs around this clean event
-                nh_time_mask = abs(df['Event_Date'] - nh_row['Event_Date']).dt.days <= x_days
-                suppress_nh_mask = dist_mask & nh_time_mask & (df['is_HAB'].str.strip().str.upper() == 'NO') & (df.index != nh_idx)
+                # Suppress other Non-HABs around this clean event using the X days window
+                nh_x_time_mask = abs(df['Event_Date'] - nh_date).dt.days <= x_days
+                suppress_nh_mask = dist_mask & nh_x_time_mask & (df['is_HAB'].str.strip().str.upper() == 'NO') & (df.index != nh_idx)
                 df.loc[suppress_nh_mask, 'removed_by_idx'] = nh_row['id_x']
                 break
                 
         if not best_non_hab_item:
-            logging.info("  Could not find a valid clean satellite pair for this HAB.")
+            logging.info("  Could not find a valid, pure clean satellite pair for this HAB.")
 
         # 5. Periodic Saving (Every 100 HABs evaluated)
         habs_processed += 1
@@ -189,9 +207,12 @@ def run_prescreener(csv_path, output_dir, x_days, y_days):
             logging.info(f"--- Checkpoint Saved: {out_file} ---")
 
     # Final Save
+    # Clean up the temporary numeric column before saving
+    df.drop(columns=['qty_numeric'], inplace=True, errors='ignore')
+    
     final_file = os.path.join(output_dir, f"{base_name}_prescreened_FINAL.csv")
     df.to_csv(final_file, index=False)
-    logging.info(f"Pipeline Complete! Final output saved to: {final_file}")
+    logging.info(f"\nPipeline Complete! Final output saved to: {final_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Greedy HAB API Pre-Screener")
@@ -199,7 +220,6 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, required=True, help="Output directory")
     args = parser.parse_args()
     
-    # Get user inputs for spatial/temporal rules
     #try:
     #    x_days = int(input("Enter 'X' (Days for temporal suppression window, e.g., 14): "))
     #    y_days = int(input("Enter 'Y' (Days for Satellite STAC search window, e.g., 5): "))
@@ -210,4 +230,5 @@ if __name__ == "__main__":
      
     x_days = 14
     y_days = 5
+    
     run_prescreener(args.input, args.output, x_days, y_days)
