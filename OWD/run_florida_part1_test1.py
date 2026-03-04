@@ -153,7 +153,7 @@ def run_prescreener(csv_path, output_dir, x_days, y_days):
         # 4. Find the Paired Non-HAB candidate
         # Must be in same 7680m, is_HAB == No, removed_by_idx is empty. Sort by lowest quantity.
         non_hab_mask = dist_mask & (df['is_HAB'].str.strip().str.upper() == 'NO') & \
-                       (df['removed_by_idx'] == "")
+                       (df['removed_by_idx'].isna() | (df['removed_by_idx'] == ""))
                        
         df_non_habs = df[non_hab_mask].sort_values(by='organismQuantity', ascending=True)
         
