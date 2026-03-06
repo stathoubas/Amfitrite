@@ -68,7 +68,7 @@ def check_scl_water(item, lat, lon):
         return False
 
 def search_stac(lat, lon, target_date, y_days):
-    """Searches PC for Sentinel-2 items within +- Y days, < 50% clouds."""
+    """Searches PC for Sentinel-2 items within +- Y days, < 50% clouds. Safely handles API timeouts."""
     buffer_deg = 0.1 
     bbox = [lon - buffer_deg, lat - buffer_deg, lon + buffer_deg, lat + buffer_deg]
     
@@ -76,13 +76,21 @@ def search_stac(lat, lon, target_date, y_days):
     end_date = pd.to_datetime(target_date) + timedelta(days=y_days)
     date_range = f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
     
-    search = catalog.search(
-        collections=["sentinel-2-l2a"], 
-        bbox=bbox, datetime=date_range, query={"eo:cloud_cover": {"lt": 50}}
-    )
-    items = list(search.items())
-    items.sort(key=lambda x: x.properties["eo:cloud_cover"])
-    return items
+    try:
+        search = catalog.search(
+            collections=["sentinel-2-l2a"], 
+            bbox=bbox, 
+            datetime=date_range, 
+            query={"eo:cloud_cover": {"lt": 50}}
+        )
+        items = list(search.items())
+        items.sort(key=lambda x: x.properties["eo:cloud_cover"])
+        return items
+        
+    except Exception as e:
+        # Catch the timeout (or any other API error), log it, and return an empty list
+        logging.error(f"    -> [API ERROR] STAC search timed out or failed for {target_date.date()}: {str(e)}")
+        return []
 
 def is_unsuppressed(val):
     return pd.isna(val) or str(val).strip() == ""
