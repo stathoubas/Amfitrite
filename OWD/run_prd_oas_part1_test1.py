@@ -4,7 +4,6 @@ Created on Fri Mar  6 20:05:52 2026
 
 @author: K. Pikounis
 """
-
 import pandas as pd
 import numpy as np
 import argparse
@@ -68,7 +67,7 @@ def check_scl_water(item, lat, lon):
         return False
 
 def search_stac(lat, lon, target_date, y_days):
-    """Searches PC for Sentinel-2 items within +- Y days, < 50% clouds. Safely handles API timeouts."""
+    """Searches PC for Sentinel-2 items within +- Y days, safely handling API timeouts."""
     buffer_deg = 0.1 
     bbox = [lon - buffer_deg, lat - buffer_deg, lon + buffer_deg, lat + buffer_deg]
     
@@ -79,23 +78,19 @@ def search_stac(lat, lon, target_date, y_days):
     try:
         search = catalog.search(
             collections=["sentinel-2-l2a"], 
-            bbox=bbox, 
-            datetime=date_range, 
-            query={"eo:cloud_cover": {"lt": 50}}
+            bbox=bbox, datetime=date_range, query={"eo:cloud_cover": {"lt": 50}}
         )
         items = list(search.items())
         items.sort(key=lambda x: x.properties["eo:cloud_cover"])
         return items
-        
     except Exception as e:
-        # Catch the timeout (or any other API error), log it, and return an empty list
         logging.error(f"    -> [API ERROR] STAC search timed out or failed for {target_date.date()}: {str(e)}")
         return []
 
 def is_unsuppressed(val):
     return pd.isna(val) or str(val).strip() == ""
 
-def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
+def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, purity_days, n_cases):
     base_name = os.path.splitext(os.path.basename(csv_path))[0]
     setup_logger(output_dir, base_name)
     
@@ -113,18 +108,17 @@ def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
     if 'sat_item' not in df.columns: df['sat_item'] = ""
     if 'cluster_ID' not in df.columns: df['cluster_ID'] = np.nan
     if 'suppressed_by' not in df.columns: df['suppressed_by'] = ""
-    if 'removed_by_ID' not in df.columns: df['removed_by_ID'] = ""  # Respect Florida overlaps
+    if 'removed_by_ID' not in df.columns: df['removed_by_ID'] = "" 
     
     # Pre-sort the entire DataFrame by concentration descending to identify our Seed points
     df_sorted = df.sort_values(by='qty_numeric', ascending=False)
     
     cluster_id_counter = 1
     
-    logging.info(f"Starting Phase 1: Clustered Target Mining (Targeting {n_cases} HABs and {n_cases} Clean pairs per cluster)...")
+    logging.info(f"Starting Phase 1: Target {n_cases} HABs and {n_cases} Cleans | Purity Window: +-{purity_days} days...")
     
     # Main Loop over Potential Seed Points
     for seed_idx, seed_row in df_sorted.iterrows():
-        # Skip if this row has already been clustered, suppressed, or removed by Florida overlap
         if pd.notna(df.at[seed_idx, 'cluster_ID']): continue
         if not is_unsuppressed(df.at[seed_idx, 'suppressed_by']): continue
         if not is_unsuppressed(df.at[seed_idx, 'removed_by_ID']): continue
@@ -143,8 +137,6 @@ def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
         df.loc[cluster_mask, 'cluster_ID'] = cluster_id_counter
         
         logging.info(f"  -> Captured {cluster_mask.sum()} raw entries in Cluster {cluster_id_counter}.")
-        
-        # Create a view of just this cluster to work with
         cluster_indices = df[cluster_mask].index
         
         # --- B. FIND `N` HAB CASES IN THIS CLUSTER ---
@@ -154,7 +146,6 @@ def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
         habs_found = 0
         for cand_idx, cand_row in cluster_habs.iterrows():
             if habs_found >= n_cases: break
-            # Check if this row was suppressed during a previous iteration of THIS cluster loop
             if not is_unsuppressed(df.at[cand_idx, 'suppressed_by']): continue
             if not is_unsuppressed(df.at[cand_idx, 'removed_by_ID']): continue
             
@@ -168,9 +159,8 @@ def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
                     df.at[cand_idx, 'sat_item'] = item.id
                     habs_found += 1
                     
-                    # Temporal Suppression WITHIN this cluster
                     time_mask = abs(df.loc[cluster_indices, 'Event_Date_Parsed'] - cand_date).dt.days <= x_days
-                    suppress_mask = time_mask & (df.loc[cluster_indices, 'sat_item'] == "") # Don't overwrite successes
+                    suppress_mask = time_mask & (df.loc[cluster_indices, 'sat_item'] == "") 
                     df.loc[cluster_indices[suppress_mask], 'suppressed_by'] = f"HAB_{cand_row.get('id_x')}"
                     break
         
@@ -187,13 +177,18 @@ def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
             cand_date = cand_row['Event_Date_Parsed']
             logging.info(f"  [Clean Search] Trying ID {cand_row.get('id_x')} | Qty: {cand_row['qty_numeric']} | Date: {cand_date.date()}")
             
-            # THE PURITY CHECK
-            y_time_mask = abs(df.loc[cluster_indices, 'Event_Date_Parsed'] - cand_date).dt.days <= y_days
-            contaminants = df.loc[cluster_indices][y_time_mask & ((df.loc[cluster_indices, 'is_HAB'].str.strip().str.upper() == 'YES') | (df.loc[cluster_indices, 'qty_numeric'] > 10000))]
+            # --- THE NEW STRICT PURITY CHECK ---
+            purity_time_mask = abs(df.loc[cluster_indices, 'Event_Date_Parsed'] - cand_date).dt.days <= purity_days
+            contaminants = df.loc[cluster_indices][
+                purity_time_mask & 
+                ((df.loc[cluster_indices, 'is_HAB'].str.strip().str.upper() == 'YES') | 
+                 (df.loc[cluster_indices, 'qty_numeric'] > 10000))
+            ]
             
             if not contaminants.empty:
-                logging.info(f"    -> [!] Purity Check Failed: Contamination found within {y_days} days. Skipping.")
+                logging.info(f"    -> [!] Purity Check Failed: Contamination found within +-{purity_days} days. Skipping.")
                 continue
+            # -----------------------------------
                 
             items = search_stac(seed_lat, seed_lon, cand_date, y_days)
             for item in items:
@@ -202,21 +197,18 @@ def run_clustered_prescreener(csv_path, output_dir, x_days, y_days, n_cases):
                     df.at[cand_idx, 'sat_item'] = item.id
                     cleans_found += 1
                     
-                    # Temporal Suppression WITHIN this cluster
                     time_mask = abs(df.loc[cluster_indices, 'Event_Date_Parsed'] - cand_date).dt.days <= x_days
                     suppress_mask = time_mask & (df.loc[cluster_indices, 'sat_item'] == "")
                     df.loc[cluster_indices[suppress_mask], 'suppressed_by'] = f"Clean_{cand_row.get('id_x')}"
                     break
                     
         # --- D. FINAL CLUSTER CLEANUP ---
-        # Any row in this cluster that didn't get a sat_item is now permanently suppressed
         leftover_mask = (df.loc[cluster_indices, 'sat_item'] == "") & (df.loc[cluster_indices, 'suppressed_by'] == "")
         df.loc[cluster_indices[leftover_mask], 'suppressed_by'] = f"Cluster_{cluster_id_counter}_Cleanup"
         
         logging.info(f"  Cluster {cluster_id_counter} Complete | Yield: {habs_found} HABs, {cleans_found} Cleans.")
         cluster_id_counter += 1
         
-        # Periodic Save
         if cluster_id_counter % 20 == 0:
             out_file = os.path.join(output_dir, f"{base_name}_clustered_part_{cluster_id_counter}.csv")
             df.drop(columns=['Event_Date_Parsed', 'qty_numeric'], errors='ignore').to_csv(out_file, index=False)
@@ -236,12 +228,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     #try:
-    #    n_cases = int(input("Enter 'N' (Max number of HAB and Clean pairs to extract per cluster, e.g., 2): "))
-    #    x_days = int(input("Enter 'X' (Days for temporal suppression window inside the cluster, e.g., 14): "))
+    #    n_cases = int(input("Enter 'N' (Max number of HAB and Clean pairs per cluster, e.g., 2): "))
+    #    x_days = int(input("Enter 'X' (Days for temporal suppression window inside cluster, e.g., 14): "))
     #    y_days = int(input("Enter 'Y' (Days for Satellite STAC search window, e.g., 5): "))
+    #    purity_days = int(input("Enter 'Purity Window' (Days strictly clean around Non-HABs, e.g., 10): "))
     #except ValueError:
-    #    print("Invalid input. Defaulting to N=2, X=14, Y=5.")
-    #    n_cases, x_days, y_days = 2, 14, 5
-    n_cases, x_days, y_days = 2, 14, 5
-        
-    run_clustered_prescreener(args.input, args.output, x_days, y_days, n_cases)
+    #    print("Invalid input. Defaulting to N=2, X=14, Y=5, Purity=10.")
+    #    n_cases, x_days, y_days, purity_days = 2, 14, 5, 10
+    
+    n_cases, x_days, y_days, purity_days = 2, 14, 5, 10
+    run_clustered_prescreener(args.input, args.output, x_days, y_days, purity_days, n_cases)
