@@ -336,4 +336,5 @@ def run_decoupled_prescreener(csv_path, output_dir, x_days, y_days1, y_days2, pu
     logging.info(f"\n{'='*60}\nPIPELINE COMPLETE!\nTotal HABs: {total_habs_found}\nTotal Cleans: {total_cleans_found}\nOutput: {final_file}\n{'='*60}")
 
 n_cases, x_days, y_days1, y_days2, purity_days, gap_days = 3, 14, 5, 15, 10, 120
-run_decoupled_prescreener(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Iains dataset\pre_processed_v3.csv", r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Iains dataset", x_days, y_days1, y_days2, purity_days, gap_days, n_cases)
+#run_decoupled_prescreener(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Iains dataset\pre_processed_v3.csv", r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Iains dataset", x_days, y_days1, y_days2, purity_days, gap_days, n_cases)
+run_decoupled_prescreener(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Sweden\metadata_2021_v3.csv", r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Sweden", x_days, y_days1, y_days2, purity_days, gap_days, n_cases)
