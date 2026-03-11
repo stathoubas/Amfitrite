@@ -23,6 +23,7 @@ def analyze_florida_output(csv_path):
         return
         
     df_valid = df[df['output_folder'].notna()].copy()
+    df_valid = df_valid[df_valid["status"].astype(str).str.upper() == "SUCCESS"]
     df_valid = df_valid[df_valid['output_folder'].astype(str).str.strip() != '']
     df_valid = df_valid[df_valid['output_folder'].astype(str).str.lower() != 'nan']
     df_valid = df_valid[df_valid["Overall_Class"].astype(str).str.lower() != "filters removed all tiles"]
@@ -38,7 +39,8 @@ def analyze_florida_output(csv_path):
     # 3. Separate into HABs and Non-HABs
     is_hab_series = df_valid['is_HAB'].astype(str).str.strip().str.upper()
     hab_df = df_valid[is_hab_series == 'YES']
-    non_hab_df = df_valid[is_hab_series == 'NO']
+    #non_hab_df = df_valid[is_hab_series == 'NO']
+    non_hab_df = df_valid[is_hab_series == 'POTENTIAL NO']
 
     # 4. Define a helper function to print the stats
     def print_stats(subset, name):
@@ -73,4 +75,7 @@ def analyze_florida_output(csv_path):
     print("="*40 + "\n")
 
 #analyze_florida_output(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Florida\Historic_Harmful_Algal_Bloom_Events_2015_-_2023_homogenised_v2_prescreened_FINAL_with_results.csv")
-analyze_florida_output(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\North American Arctic region\homogenized_arctic_plankton_v1_decoupled_FINAL_v2_with_results.csv")
+#analyze_florida_output(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\North American Arctic region\homogenized_arctic_plankton_v1_decoupled_FINAL_v2_with_results.csv")
+#analyze_florida_output(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\OBIS dataset v2\datasets_1_3_4_6_v5_decoupled_FINAL_v2_with_results.csv")
+#analyze_florida_output(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Iains dataset\pre_processed_v3_priority_FINAL_with_results.csv")
+analyze_florida_output(r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\OWD\Sweden\metadata_2021_v3_priority_FINAL_with_results.csv")
