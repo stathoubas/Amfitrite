@@ -674,7 +674,7 @@ def create_collage(base_dir):
     print(f"Collage successfully saved to: {out_path}")
 
 
-def folder_summary(base_folder_path, add_images_to_excel=True):
+def folder_summary(base_folder_path, add_images_to_excel=False):
     """
     Summarizes CyFi and CNN results, calculates totals, creates a collage,
     and optionally embeds prediction map thumbnails into the Excel file.

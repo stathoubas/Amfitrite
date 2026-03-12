@@ -236,5 +236,5 @@ if __name__ == "__main__":
     #    print("Invalid input. Defaulting to N=2, X=14, Y=5, Purity=10.")
     #    n_cases, x_days, y_days, purity_days = 2, 14, 5, 10
     
-    n_cases, x_days, y_days, purity_days = 2, 14, 5, 10
+    n_cases, x_days, y_days, purity_days = 3, 14, 5, 10
     run_clustered_prescreener(args.input, args.output, x_days, y_days, purity_days, n_cases)
