@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Mar 12 00:57:55 2026
+Created on Thu Mar 12 16:14:28 2026
 
 @author: K. Pikounis
 """
@@ -104,22 +104,22 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
         
     # 2. Read the Input Data
     try:
-        df = pd.read_csv(csv_path, low_memory=False) if csv_path.endswith('.csv') else pd.read_excel(csv_path)
+        df = pd.read_csv(csv_path) if csv_path.endswith('.csv') else pd.read_excel(csv_path)
     except Exception as e:
         logging.error(f"Failed to read input file {csv_path}. Error: {e}")
         return
-        
-    # Dynamically locate Lat/Lon columns to catch typos like 'latitiud' and 'Longtitu'
-    lat_col = next((c for c in df.columns if 'lat' in c.lower()), 'latitude')
-    lon_col = next((c for c in df.columns if 'lon' in c.lower()), 'longitude')
+
+    BOX_SIDE_PIXELS = 256  
     
-    # Locate Date Column (Iain's dataset uses 'date')
+    # Dynamically locate columns for Iain's dataset format
+    lat_col = next((c for c in df.columns if 'lat' in c.lower()), 'lat')
+    lon_col = next((c for c in df.columns if 'lon' in c.lower()), 'lon')
     date_col = next((c for c in df.columns if 'date' in c.lower()), 'date')
-    
+
     # 3. Process Row by Row
     for index, row in df.iterrows():
-        # --- ROBUST ID EXTRACTION ---
-        raw_id = row.get('num', row.get('generated_id', f"Row_{index}"))
+        # Look for 'num' first (Iain's format), then generated_id from Phase 1. Fallback to Row index.
+        raw_id = row.get('num', row.get('id_x', row.get('generated_id', f"Row_{index}")))
         case_id = str(raw_id).replace(":", "_")
         
         # Ensure there is a valid satellite item assigned from Phase 1
@@ -127,8 +127,7 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
         
         # Skip if missing STAC item or "nan" string
         if not sat_item_id or sat_item_id.lower() == 'nan':
-            if index % 100 == 0:
-                logging.debug(f"Row {index+1}: Skipped (No valid satellite item)")
+            logging.info(f"Row {index+1}: Case {case_id} has no valid satellite item. Skipping.")
             continue
             
         if case_id in processed_cases:
@@ -142,12 +141,10 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
             logging.error(f"Row {index} ({case_id}): Invalid or missing Lat/Lon. Skipping.")
             continue
             
-        # Extract Date safely
+        # Safely grab the date
         raw_date = row.get(date_col)
         try:
-            parsed_date = pd.to_datetime(str(raw_date), errors='coerce')
-            if pd.isna(parsed_date):
-                raise ValueError("Parsed date is NaT")
+            parsed_date = pd.to_datetime(str(raw_date))
             date_str = parsed_date.strftime("%Y-%m-%d")
         except Exception as e:
             logging.error(f"Row {index} ({case_id}): Invalid Date format '{raw_date}'. Skipping.")
@@ -165,7 +162,7 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
         out_folder_name = case_id
         out_folder_path = os.path.join(output_root, out_folder_name)
         
-        # Classification variables
+        # New classification variables
         overall_class = ""
         max_hab_idx = ""
         hab_tiles_sorted = ""
@@ -204,7 +201,7 @@ def run_heavy_pipeline(csv_path, output_root, model_paths):
             run_cyfi_and_slice_scene(
                 base_folder_path=out_folder_path, 
                 date_str=final_date,
-                print_images=True
+                print_images=False  # Set to False to prevent popping up windows during bulk batch runs
             )
 
             # --- STAGE 4: CNN Inference ---
@@ -321,7 +318,7 @@ if __name__ == "__main__":
         "rdnet_no_scl": "/vol/Amfitrite/CNNs_for_annotation/rdnet_no_scl/best_epoch_35.pth"
     }
     
-    parser = argparse.ArgumentParser(description="Phase 2: Heavy Execution Pipeline (Iain's Dataset)")
+    parser = argparse.ArgumentParser(description="Phase 2: Heavy Execution Pipeline")
     parser.add_argument("--input", type=str, required=True, help="Path to the input CSV/Excel file")
     parser.add_argument("--output", type=str, required=True, help="Path to the root output folder")
     args = parser.parse_args()
