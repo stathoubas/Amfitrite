@@ -139,15 +139,15 @@ if __name__ == "__main__":
     # -------------------------------------------------------------
     # 1. SET YOUR VARIABLES HERE
     # -------------------------------------------------------------
-    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/datasets_1_3_4_6_v5_decoupled_FINAL_v2_v3_with_results_processed.csv"
-    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/datasets_1_3_4_6_v5_decoupled_FINAL_v2_v3_with_results_processed_tiles.csv"
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/homogenized_calhabmap_decoupled_FINAL_v3.1_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/homogenized_calhabmap_decoupled_FINAL_v3.1_with_results_processed_tiles.csv"
     
     # The column to use as the unique ID
-    ID_COLUMN = "id_x" 
+    ID_COLUMN = "SampleID" 
     
     # The list of columns from the original dataset you want to carry over to the final Excel
-    COLUMNS_TO_KEEP = ['id_x', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
-                       'dataset']
+    COLUMNS_TO_KEEP = ['SampleID', 'Location_Code', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
+                       'dataset', 'is_HAB', 'sat_item']
     
     # -------------------------------------------------------------
     # 2. RUN SCRIPT
