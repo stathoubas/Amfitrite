@@ -173,13 +173,24 @@ if __name__ == "__main__":
     COLUMNS_TO_KEEP = ['num' ,'Country' ,'Location' , 'Incident' , 'Company' ,'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'is_HAB', 'sat_item']
     
-    '''
     
     INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/metadata_2021_v3_priority_FINAL_with_results_processed.csv"
     OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/metadata_2021_v3_priority_FINAL_with_results_processed_tiles.csv"
     ID_COLUMN = "generated_id" 
     COLUMNS_TO_KEEP = ['generated_id' ,'report_id', 'algae_overview_photo', 'algae_detail_photo', 'place',
                        'eventDate', 'decimalLatitude', 'decimalLongitude', 'is_HAB', 'sat_item']
+    
+    
+    '''
+    
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/REPHY_Manche_Atlantique_1987-2022_decoupled_FINAL_v2_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/REPHY_Manche_Atlantique_1987-2022_decoupled_FINAL_v2_with_results_processed_tiles.csv"
+    ID_COLUMN = "SampleID" 
+    COLUMNS_TO_KEEP = ['SampleID' ,'Lieu de surveillance : Entité de classement : Libellé','Lieu de surveillance : Identifiant',
+                       'Lieu de surveillance : Mnémonique', 'Lieu de surveillance : Libellé', 'Passage : Identifiant interne',
+                       'Passage : Date de validation', 'Passage : Niveau de qualité', 'Passage : Date de qualification', 'Passage : Commentaire de qualification',
+                       'eventDate', 'decimalLatitude', 'decimalLongitude', 'is_HAB', 'sat_item']
+    
     
     
     compile_annotated_tiles(INPUT_CSV, OUTPUT_CSV, ID_COLUMN, COLUMNS_TO_KEEP)
