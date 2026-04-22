@@ -119,9 +119,9 @@ def cross_reference_datasets_v2(florida_csv, new_dataset_csv, output_csv, x_days
         return
 
     # Safety check for the new column
-    if 'output_folder' not in df_fl.columns:
-        print("Error: 'output_folder' column not found in the Florida dataset. Please check the file.")
-        return
+    #if 'output_folder' not in df_fl.columns:
+    #    print("Error: 'output_folder' column not found in the Florida dataset. Please check the file.")
+    #    return
 
     print(f"Loading target dataset to be filtered: {new_dataset_csv}")
     try:
