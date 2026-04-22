@@ -136,20 +136,21 @@ def compile_annotated_tiles(input_csv, output_csv, id_col, keep_cols):
 
 
 if __name__ == "__main__":
-    # -------------------------------------------------------------
-    # 1. SET YOUR VARIABLES HERE
-    # -------------------------------------------------------------
+
+    '''
     INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/homogenized_calhabmap_decoupled_FINAL_v3.1_with_results_processed.csv"
     OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/homogenized_calhabmap_decoupled_FINAL_v3.1_with_results_processed_tiles.csv"
-    
-    # The column to use as the unique ID
     ID_COLUMN = "SampleID" 
-    
-    # The list of columns from the original dataset you want to carry over to the final Excel
     COLUMNS_TO_KEEP = ['SampleID', 'Location_Code', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'dataset', 'is_HAB', 'sat_item']
     
-    # -------------------------------------------------------------
-    # 2. RUN SCRIPT
-    # -------------------------------------------------------------
+    
+    '''
+    
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/Historic_Harmful_Algal_Bloom_Events_2015_-_2023_homogenised_v3_decoupled_FINAL_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/Historic_Harmful_Algal_Bloom_Events_2015_-_2023_homogenised_v3_decoupled_FINAL_with_results_processed_tiles.csv"
+    ID_COLUMN = "id_x" 
+    COLUMNS_TO_KEEP = ['id_x', 'HAB_ID', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
+                       'dataset', 'is_HAB', 'sat_item']
+    
     compile_annotated_tiles(INPUT_CSV, OUTPUT_CSV, ID_COLUMN, COLUMNS_TO_KEEP)
