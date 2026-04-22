@@ -145,12 +145,22 @@ if __name__ == "__main__":
                        'dataset', 'is_HAB', 'sat_item']
     
     
-    '''
     
     INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/Historic_Harmful_Algal_Bloom_Events_2015_-_2023_homogenised_v3_decoupled_FINAL_with_results_processed.csv"
     OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/Historic_Harmful_Algal_Bloom_Events_2015_-_2023_homogenised_v3_decoupled_FINAL_with_results_processed_tiles.csv"
     ID_COLUMN = "id_x" 
     COLUMNS_TO_KEEP = ['id_x', 'HAB_ID', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'dataset', 'is_HAB', 'sat_item']
+    
+    '''
+    
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/homogenized_arctic_plankton_v1_decoupled_FINAL_v2_v3_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/homogenized_arctic_plankton_v1_decoupled_FINAL_v2_v3_with_results_processed_tiles.csv"
+    ID_COLUMN = "generated_id" 
+    COLUMNS_TO_KEEP = ['generated_id', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
+                       'is_HAB', 'sat_item']
+    
+    
+    
     
     compile_annotated_tiles(INPUT_CSV, OUTPUT_CSV, ID_COLUMN, COLUMNS_TO_KEEP)
