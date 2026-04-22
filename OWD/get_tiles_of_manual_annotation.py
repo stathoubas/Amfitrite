@@ -152,7 +152,7 @@ if __name__ == "__main__":
     COLUMNS_TO_KEEP = ['id_x', 'HAB_ID', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'dataset', 'is_HAB', 'sat_item']
     
-    '''
+    
     
     INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/homogenized_arctic_plankton_v1_decoupled_FINAL_v2_v3_with_results_processed.csv"
     OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/homogenized_arctic_plankton_v1_decoupled_FINAL_v2_v3_with_results_processed_tiles.csv"
@@ -160,7 +160,13 @@ if __name__ == "__main__":
     COLUMNS_TO_KEEP = ['generated_id', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'is_HAB', 'sat_item']
     
+    '''
     
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/homogenized_habsos_after_Florida_v3.1_FL_and_noFL_decoupled_FINAL_v2_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/homogenized_habsos_after_Florida_v3.1_FL_and_noFL_decoupled_FINAL_v2_with_results_processed_tiles.csv"
+    ID_COLUMN = "id_x" 
+    COLUMNS_TO_KEEP = ['id_x', 'STATE_ID', 'DESCRIPTION', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
+                       'is_HAB', 'sat_item']
     
     
     compile_annotated_tiles(INPUT_CSV, OUTPUT_CSV, ID_COLUMN, COLUMNS_TO_KEEP)
