@@ -160,12 +160,19 @@ if __name__ == "__main__":
     COLUMNS_TO_KEEP = ['generated_id', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'is_HAB', 'sat_item']
     
-    '''
     
     INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/homogenized_habsos_after_Florida_v3.1_FL_and_noFL_decoupled_FINAL_v2_with_results_processed.csv"
     OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/homogenized_habsos_after_Florida_v3.1_FL_and_noFL_decoupled_FINAL_v2_with_results_processed_tiles.csv"
     ID_COLUMN = "id_x" 
     COLUMNS_TO_KEEP = ['id_x', 'STATE_ID', 'DESCRIPTION', 'eventDate', 'decimalLatitude', 'decimalLongitude', 
+                       'is_HAB', 'sat_item']
+    
+    '''
+    
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/pre_processed_v3_priority_FINAL_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/pre_processed_v3_priority_FINAL_with_results_processed_tiles.csv"
+    ID_COLUMN = "num" 
+    COLUMNS_TO_KEEP = ['num' ,'Country' ,'Location' , 'Incident' , 'Company' ,'eventDate', 'decimalLatitude', 'decimalLongitude', 
                        'is_HAB', 'sat_item']
     
     
