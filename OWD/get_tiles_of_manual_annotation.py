@@ -181,10 +181,20 @@ if __name__ == "__main__":
                        'eventDate', 'decimalLatitude', 'decimalLongitude', 'is_HAB', 'sat_item']
     
     
-    '''
     
     INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/REPHY_Manche_Atlantique_1987-2022_decoupled_FINAL_v2_with_results_processed.csv"
     OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/REPHY_Manche_Atlantique_1987-2022_decoupled_FINAL_v2_with_results_processed_tiles.csv"
+    ID_COLUMN = "SampleID" 
+    COLUMNS_TO_KEEP = ['SampleID' ,'Lieu de surveillance : Entité de classement : Libellé','Lieu de surveillance : Identifiant',
+                       'Lieu de surveillance : Mnémonique', 'Lieu de surveillance : Libellé', 'Passage : Identifiant interne',
+                       'Passage : Date de validation', 'Passage : Niveau de qualité', 'Passage : Date de qualification', 'Passage : Commentaire de qualification',
+                       'eventDate', 'decimalLatitude', 'decimalLongitude', 'is_HAB', 'sat_item']
+    
+    
+    '''
+    
+    INPUT_CSV   = "/vol2/Amfitrite/OWD/processed_results/REPHY_Med_1987-2022_decoupled_FINAL_v2_with_results_processed.csv"
+    OUTPUT_CSV  = "/vol2/Amfitrite/OWD/processed_results/REPHY_Med_1987-2022_decoupled_FINAL_v2_with_results_processed_tiles.csv"
     ID_COLUMN = "SampleID" 
     COLUMNS_TO_KEEP = ['SampleID' ,'Lieu de surveillance : Entité de classement : Libellé','Lieu de surveillance : Identifiant',
                        'Lieu de surveillance : Mnémonique', 'Lieu de surveillance : Libellé', 'Passage : Identifiant interne',
