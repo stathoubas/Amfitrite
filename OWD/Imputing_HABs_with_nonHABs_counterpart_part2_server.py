@@ -318,9 +318,18 @@ def run_cyfi_and_slice_core(
 
         try:
             print("Running CyFi Feature Generation...")
-            _, features_df = generate_all_features(
-                samples=samples_df, satellite_meta=satellite_meta_df, config=features_config, cache_dir=temp_cache
-            )
+            try:
+                res = generate_all_features(
+                    samples=samples_df, satellite_meta=satellite_meta_df, config=features_config, cache_dir=temp_cache
+                )
+            except SystemExit:
+                raise ValueError("CyFi forced a SystemExit. Usually due to dropped NaN edge pixels.")
+                
+            if res is None or len(res) < 2:
+                raise ValueError("CyFi returned empty results.")
+                
+            _, features_df = res
+            
             print("Running Prediction Model...")
             pipeline = CyFiPipeline.from_disk(DEFAULT_MODEL_PATH)
             pipeline.predict_features = features_df
@@ -745,11 +754,12 @@ def run_heavy_pipeline(input_path, output_root, model_paths):
             failed_stage = "None" 
             logging.info(f"Successfully completed {uid} | Class: {overall_class} | Score: {total_index}")
 
-        except Exception as e:
+        except (Exception, SystemExit) as e:
             status = "FAILED"
             error_msg = str(e).replace('\n', ' ')
             logging.error(f"Failed at {failed_stage} for {uid}. Error: {error_msg}")
-            logging.debug(traceback.format_exc()) 
+            if isinstance(e, Exception):
+                logging.debug(traceback.format_exc())
             
         finally:
             
