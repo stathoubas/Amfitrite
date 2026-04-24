@@ -25,15 +25,20 @@ catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", mod
 
 def check_tile_quality(item, lat, lon):
     """
-    Clips the SCL band to exactly 2560x2560m (256px) around the coordinate.
+    Clips the SCL band to exactly 2560x2560m around the coordinate.
     Returns (water_pixels, local_cloud_cover_percentage) or (-1, -1) if invalid.
     """
     try:
-        target_crs = CRS.from_string(item.properties["proj:code"])
+        # FIX 1: Safely get the EPSG code (Planetary Computer uses proj:epsg)
+        epsg = item.properties.get("proj:epsg")
+        if not epsg:
+            return -1, -1
+            
+        target_crs = CRS.from_epsg(epsg)
         transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
         center_x, center_y = transformer.transform(lon, lat)
 
-        half_side = 1280 # 1280m = 128 pixels * 10m/pixel (256 total width)
+        half_side = 1280 # 1280m radius (2560m total width)
         minx, maxx = center_x - half_side, center_x + half_side
         miny, maxy = center_y - half_side, center_y + half_side
 
@@ -43,18 +48,24 @@ def check_tile_quality(item, lat, lon):
         da_scl = rioxarray.open_rasterio(scl_href)
         da_clip = da_scl.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy, crs=target_crs)
         
-        # SCL 6 = Water
-        water_pixels = np.sum(da_clip.values == 6)
+        # Calculate native 20m pixels
+        water_pixels_20m = np.sum(da_clip.values == 6)
+        cloud_pixels_20m = np.sum(np.isin(da_clip.values, [3, 8, 9, 10]))
         
-        # SCL 3=Shadow, 8=Med Cloud, 9=High Cloud, 10=Cirrus
-        cloud_pixels = np.sum(np.isin(da_clip.values, [3, 8, 9, 10]))
-        local_cloud_cover = (cloud_pixels / 65536) * 100.0
+        # FIX 2: Upscale 20m pixels to 10m CyFi pixels (1 pixel -> 4 pixels)
+        # Native array is 16,384 pixels. CyFi array is 65,536 pixels.
+        water_pixels_10m = water_pixels_20m * 4
+        cloud_pixels_10m = cloud_pixels_20m * 4
         
-        return water_pixels, local_cloud_cover
+        local_cloud_cover = (cloud_pixels_10m / 65536.0) * 100.0
         
-    except Exception:
-        # Fails if box goes off the edge of the image, etc.
+        return water_pixels_10m, local_cloud_cover
+        
+    except Exception as e:
+        # Added a debug print so it never fails silently again
+        print(f"  [Debug] Tile check failed for {item.id}: {e}")
         return -1, -1
+
 
 def is_date_safe(candidate_date, forbidden_intervals):
     """Checks if a date falls inside ANY of the forbidden [start, end] intervals."""
