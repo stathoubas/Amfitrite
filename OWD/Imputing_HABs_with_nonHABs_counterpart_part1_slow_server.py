@@ -153,8 +153,8 @@ def run_imputation_pipeline(input_csv, output_csv):
             for item in items:
                 water_px, local_clouds = check_tile_quality(item, lat, lon)
                 
-                # Rule: Must have > 10,000 water pixels AND <= 15% local cloud cover
-                if water_px >= 10000 and local_clouds <= 15.0:
+                # Rule: Must have > 32,000 water pixels AND <= 15% local cloud cover
+                if water_px >= 32000 and local_clouds <= 15.0:
                     item_date_str = item.datetime.strftime('%Y-%m-%d')
                     item_date_obj = pd.to_datetime(item_date_str)
                     
