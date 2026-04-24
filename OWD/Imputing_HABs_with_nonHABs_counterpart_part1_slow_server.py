@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Apr 22 16:44:50 2026
-
-@author: K. Pikounis
+Created for AMFITRITE 
+Pipeline: Dynamic 90-Day Forbidden Interval Satellite Imputation
 """
 
 import pandas as pd
@@ -16,7 +15,6 @@ import random
 import ast
 import time
 import os
-import logging
 import warnings
 
 # Suppress rioxarray/pyproj warnings for cleaner terminal output
@@ -24,50 +22,6 @@ warnings.filterwarnings("ignore", category=UserWarning)
 
 # Initialize STAC client
 catalog = Client.open("https://planetarycomputer.microsoft.com/api/stac/v1", modifier=pc.sign_inplace)
-
-def get_random_safe_dates(existing_dates_str, num_dates=8):
-    """
-    Parses the original dates list and generates 'num_dates' random dates 
-    between 2016 and today that do NOT fall within +/- 60 days of any existing date.
-    """
-    # Parse the string representation of the list into actual datetime objects
-    try:
-        raw_dates = ast.literal_eval(existing_dates_str)
-        existing_dates = [pd.to_datetime(d) for d in raw_dates]
-    except Exception:
-        existing_dates = []
-
-    safe_dates = []
-    start_date = datetime.datetime(2016, 1, 1)
-    end_date = datetime.datetime.now()
-    
-    start_ts = start_date.timestamp()
-    end_ts = end_date.timestamp()
-    
-    attempts = 0
-    while len(safe_dates) < num_dates and attempts < 1000:
-        attempts += 1
-        rand_ts = random.uniform(start_ts, end_ts)
-        candidate = datetime.datetime.fromtimestamp(rand_ts)
-        
-        # Check against forbidden zones (+/- 60 days from existing dates)
-        is_safe = True
-        for ed in existing_dates:
-            if abs((candidate - ed).days) <= 60:
-                is_safe = False
-                break
-                
-        # Make sure our new candidate isn't too close to another candidate we just picked
-        if is_safe:
-            for sd in safe_dates:
-                if abs((candidate - sd).days) <= 15:
-                    is_safe = False
-                    break
-                    
-        if is_safe:
-            safe_dates.append(candidate)
-            
-    return safe_dates
 
 def check_tile_quality(item, lat, lon):
     """
@@ -84,6 +38,7 @@ def check_tile_quality(item, lat, lon):
         miny, maxy = center_y - half_side, center_y + half_side
 
         scl_href = pc.sign(item.assets["SCL"].href)
+        
         # Open and clip efficiently using rioxarray
         da_scl = rioxarray.open_rasterio(scl_href)
         da_clip = da_scl.rio.clip_box(minx=minx, miny=miny, maxx=maxx, maxy=maxy, crs=target_crs)
@@ -101,15 +56,18 @@ def check_tile_quality(item, lat, lon):
         # Fails if box goes off the edge of the image, etc.
         return -1, -1
 
+def is_date_safe(candidate_date, forbidden_intervals):
+    """Checks if a date falls inside ANY of the forbidden [start, end] intervals."""
+    for start, end in forbidden_intervals:
+        if start <= candidate_date <= end:
+            return False
+    return True
+
 def run_imputation_pipeline(input_csv, output_csv):
     print(f"Loading input dataset: {input_csv}")
     df = pd.read_csv(input_csv)
     
-    # Identify the ID column (assuming it's literally the first column as requested)
     id_col = df.columns[0]
-    print(f"Using '{id_col}' as the ID column.")
-    
-    # Make sure we have the necessary coordinate columns
     lat_col = next((c for c in df.columns if 'lat' in c.lower()), None)
     lon_col = next((c for c in df.columns if 'lon' in c.lower()), None)
     date_list_col = next((c for c in df.columns if 'date' in c.lower() and 'list' in c.lower()), 'dates_list')
@@ -119,13 +77,17 @@ def run_imputation_pipeline(input_csv, output_csv):
         return
 
     exploded_results = []
-    
     total_rows = len(df)
     start_time = time.time()
     processed_count = 0
     
-    print(f"\nStarting imputation for {total_rows} rows...")
+    print(f"\nStarting dynamic interval imputation for {total_rows} rows...")
     print("=" * 60)
+    
+    start_date_limit = datetime.datetime(2016, 1, 1)
+    end_date_limit = datetime.datetime.now()
+    start_ts = start_date_limit.timestamp()
+    end_ts = end_date_limit.timestamp()
     
     for index, row in df.iterrows():
         row_id = row[id_col]
@@ -133,17 +95,43 @@ def run_imputation_pipeline(input_csv, output_csv):
         lon = row[lon_col]
         dates_str = str(row.get(date_list_col, "[]"))
         
-        # 1. Generate 8 Safe Candidate Dates
-        candidate_dates = get_random_safe_dates(dates_str, num_dates=8)
-        
-        valid_items_found = []
-        
-        # 2. Search STAC for each Candidate Date (+/- 15 Days)
-        for c_date in candidate_dates:
-            start_search = c_date - datetime.timedelta(days=15)
-            end_search = c_date + datetime.timedelta(days=15)
-            date_range = f"{start_search.strftime('%Y-%m-%d')}/{end_search.strftime('%Y-%m-%d')}"
+        # 1. Initialize Forbidden Intervals with provided dates
+        forbidden_intervals = []
+        try:
+            raw_dates = ast.literal_eval(dates_str)
+            for d in raw_dates:
+                d_obj = pd.to_datetime(d)
+                forbidden_intervals.append(
+                    (d_obj - datetime.timedelta(days=45), d_obj + datetime.timedelta(days=45))
+                )
+        except Exception:
+            pass
             
+        kept_items = []
+        api_searches = 0
+        
+        # 2. Main Discovery Loop (Max 10 API searches or 8 kept images)
+        while api_searches < 10 and len(kept_items) < 8:
+            
+            # 3. Memory Guessing: Find a safe random date
+            candidate_date = None
+            for _ in range(1000): # Allow up to 1000 memory guesses per search
+                rand_ts = random.uniform(start_ts, end_ts)
+                temp_date = datetime.datetime.fromtimestamp(rand_ts)
+                if is_date_safe(temp_date, forbidden_intervals):
+                    candidate_date = temp_date
+                    break
+            
+            # SAFETY STOP CONDITION
+            if not candidate_date:
+                print(f"  [!] Timeline saturated for ID {row_id} after 1000 memory guesses. Halting search.")
+                break 
+                
+            # 4. Perform STAC Search (+/- 15 Days around candidate)
+            api_searches += 1
+            start_search = candidate_date - datetime.timedelta(days=15)
+            end_search = candidate_date + datetime.timedelta(days=15)
+            date_range = f"{start_search.strftime('%Y-%m-%dT00:00:00Z')}/{end_search.strftime('%Y-%m-%dT23:59:59Z')}"
             bbox = [lon - 0.05, lat - 0.05, lon + 0.05, lat + 0.05]
             
             try:
@@ -151,33 +139,51 @@ def run_imputation_pipeline(input_csv, output_csv):
                     collections=["sentinel-2-l2a"], 
                     bbox=bbox, 
                     datetime=date_range, 
-                    query={"eo:cloud_cover": {"lt": 50}} # Initial loose filter to save time
+                    query={"eo:cloud_cover": {"lt": 50}} # Loose global filter
                 )
                 items = list(search.items())
-            except Exception as e:
+            except Exception:
                 items = []
                 
-            # 3. Dynamic SCL Checking
+            # Sort items by lowest global cloud cover to evaluate best images first
+            items.sort(key=lambda x: x.properties.get("eo:cloud_cover", 100.0))
+            
+            found_valid_image = False
+            
             for item in items:
                 water_px, local_clouds = check_tile_quality(item, lat, lon)
                 
-                # Rule: Must have > 10,000 water pixels
-                if water_px >= 10000:
-                    item_date = item.datetime.strftime('%Y-%m-%d')
-                    valid_items_found.append({
+                # Rule: Must have > 10,000 water pixels AND <= 15% local cloud cover
+                if water_px >= 10000 and local_clouds <= 15.0:
+                    item_date_str = item.datetime.strftime('%Y-%m-%d')
+                    item_date_obj = pd.to_datetime(item_date_str)
+                    
+                    kept_items.append({
                         "sat_item": item.id,
-                        "date": item_date, # Final explicit date column added for you
+                        "date": item_date_str,
                         "local_cloud_cover": round(local_clouds, 2),
                         "water_pixels": int(water_px)
                     })
                     
-        # 4. Sort strictly by Lowest Local Cloud Cover and keep Top 5
-        if valid_items_found:
-            # Sort by local cloud cover ascending
-            valid_items_found.sort(key=lambda x: x["local_cloud_cover"])
-            top_5_items = valid_items_found[:5]
+                    # Add new +/- 45 days (90 day window) to forbidden zones
+                    forbidden_intervals.append(
+                        (item_date_obj - datetime.timedelta(days=45), item_date_obj + datetime.timedelta(days=45))
+                    )
+                    found_valid_image = True
+                    break # We found the best image in this 30-day window, move to next random search
+                    
+            # If the entire 30-day window was a bust (too cloudy or no water)
+            if not found_valid_image:
+                forbidden_intervals.append(
+                    (start_search, end_search)
+                )
+                
+        # 5. Cap and Sort Results
+        if kept_items:
+            # Sort the discovered safe images by absolute best local cloud cover
+            kept_items.sort(key=lambda x: x["local_cloud_cover"])
+            top_5_items = kept_items[:5]
             
-            # 5. Explode into new rows
             for best_item in top_5_items:
                 new_row = {
                     id_col: row_id,
@@ -205,14 +211,13 @@ def run_imputation_pipeline(input_csv, output_csv):
     if not final_df.empty:
         final_df.to_csv(output_csv, index=False)
         print("\n" + "=" * 60)
-        print(f"PIPELINE COMPLETE! Generated {len(final_df)} imputed satellite items.")
+        print(f"PIPELINE COMPLETE! Generated {len(final_df)} perfectly spaced satellite items.")
         print(f"Saved to: {output_csv}")
     else:
         print("\n[!] No valid satellite items were found for any coordinates.")
 
 
 if __name__ == "__main__":
-    # UPDATE THESE PATHS TO YOUR CSV FILES
     INPUT_CSV = r"/vol2/Amfitrite/OWD/processed_results/merged_2_HABs_to_be_processed.csv"
     OUTPUT_CSV = r"/vol2/Amfitrite/OWD/processed_results/merged_2_HABs_satelite_items.csv"
     
