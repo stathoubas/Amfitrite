@@ -29,12 +29,12 @@ def check_tile_quality(item, lat, lon):
     Returns (water_pixels, local_cloud_cover_percentage) or (-1, -1) if invalid.
     """
     try:
-        # FIX 1: Safely get the EPSG code (Planetary Computer uses proj:epsg)
-        epsg = item.properties.get("proj:epsg")
-        if not epsg:
+        # Reverted back to your original, correct logic: proj:code
+        proj_code = item.properties.get("proj:code")
+        if not proj_code:
             return -1, -1
             
-        target_crs = CRS.from_epsg(epsg)
+        target_crs = CRS.from_string(proj_code)
         transformer = Transformer.from_crs("EPSG:4326", target_crs, always_xy=True)
         center_x, center_y = transformer.transform(lon, lat)
 
@@ -52,7 +52,7 @@ def check_tile_quality(item, lat, lon):
         water_pixels_20m = np.sum(da_clip.values == 6)
         cloud_pixels_20m = np.sum(np.isin(da_clip.values, [3, 8, 9, 10]))
         
-        # FIX 2: Upscale 20m pixels to 10m CyFi pixels (1 pixel -> 4 pixels)
+        # Upscale 20m pixels to 10m CyFi pixels (1 native pixel -> 4 CyFi pixels)
         # Native array is 16,384 pixels. CyFi array is 65,536 pixels.
         water_pixels_10m = water_pixels_20m * 4
         cloud_pixels_10m = cloud_pixels_20m * 4
@@ -62,7 +62,6 @@ def check_tile_quality(item, lat, lon):
         return water_pixels_10m, local_cloud_cover
         
     except Exception as e:
-        # Added a debug print so it never fails silently again
         print(f"  [Debug] Tile check failed for {item.id}: {e}")
         return -1, -1
 
