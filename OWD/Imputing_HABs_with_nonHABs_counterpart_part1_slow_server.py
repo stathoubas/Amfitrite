@@ -78,9 +78,9 @@ def run_imputation_pipeline(input_csv, output_csv):
     df = pd.read_csv(input_csv)
     
     id_col = df.columns[0]
-    lat_col = next((c for c in df.columns if 'lat' in c.lower()), None)
-    lon_col = next((c for c in df.columns if 'lon' in c.lower()), None)
-    date_list_col = next((c for c in df.columns if 'date' in c.lower() and 'list' in c.lower()), 'dates_list')
+    lat_col = "center_lat"
+    lon_col = "center_lon"
+    date_list_col = "dates_list"
     
     if not lat_col or not lon_col:
         print("Error: Could not find latitude/longitude columns.")
