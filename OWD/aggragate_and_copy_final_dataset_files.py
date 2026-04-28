@@ -134,7 +134,7 @@ def aggregate_dataset(input_csv, output_dir):
 
 if __name__ == "__main__":
     # UPDATE THESE PATHS
-    INPUT_CSV_PATH = "path/to/your/master_dataset.csv"
-    OUTPUT_DIRECTORY = "path/to/your/final_aggregated_dataset"
+    INPUT_CSV_PATH = "/vol2/Amfitrite/OWD/processed_results/merged_2_and_imputed_v2.csv"
+    OUTPUT_DIRECTORY = "/vol2/Amfitrite/OWD/dataset_v1"
     
     aggregate_dataset(INPUT_CSV_PATH, OUTPUT_DIRECTORY)
