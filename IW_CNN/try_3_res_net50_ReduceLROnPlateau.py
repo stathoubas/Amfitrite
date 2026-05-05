@@ -487,7 +487,7 @@ if __name__ == "__main__":
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
-    output_path = "/home/kostas/AMFITRITE/res50/results2"
+    output_path = "/home/kostas/AMFITRITE/res50/results4"
     Logger_path = output_path
     batch_size = 64
     num_workers = 8
@@ -506,7 +506,7 @@ if __name__ == "__main__":
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
     #model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    model = HABLightningModel(mode='bigearthnet', lr=1e-5, weights_path="/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet50-s2-v0.2.0/model.safetensors")
+    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path="/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet50-s2-v0.2.0/model.safetensors")
     
     logger = CSVLogger(output_path, name="hab_experiment")
     

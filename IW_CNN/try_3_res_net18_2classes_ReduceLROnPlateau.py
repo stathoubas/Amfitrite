@@ -151,7 +151,7 @@ class HABLightningModel(L.LightningModule):
        
         # 3. Loss Function
         self.criterion = nn.CrossEntropyLoss(weight=self.class_weights)
-        
+        #self.criterion = nn.CrossEntropyLoss()
         
         # 3. Metrics Setup (Accuracy, F1, and Per-Class)
         def get_metrics(prefix):
@@ -501,15 +501,16 @@ if __name__ == "__main__":
     
     # --- 1. SETUP DATA ---
     # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
-    EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
-    DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
-    registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results5"
+    EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
+    DATA_ROOT = "/home/kostas/AMFITRITE/data"
+    registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
+    output_path = "/home/kostas/AMFITRITE/res18_2classes/results11"
     Logger_path = output_path
-    batch_size = 32
+    batch_size = 64
     num_workers = 8
 
-    df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
+    #df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
+    df = pd.read_excel(registry_path)
     
     train_ds = HABDataset(df, DATA_ROOT, mode='training')
     val_ds = HABDataset(df, DATA_ROOT, mode='validation')
@@ -523,7 +524,7 @@ if __name__ == "__main__":
     # --- 2. SETUP MODEL & LOGGER ---
     #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
     #model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path=r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0\model.safetensors")
+    model = HABLightningModel(mode='bigearthnet', lr=1e-4, weights_path="/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors")
 
     
     logger = CSVLogger(output_path, name="hab_experiment")
@@ -531,7 +532,7 @@ if __name__ == "__main__":
     checkpoint_callback = ModelCheckpoint(
         monitor="val_f1",
         mode="max",
-        save_top_k=3,
+        save_top_k=5,
         save_last=True,
         filename="best-hab-{epoch:02d}-{val_f1:.3f}"
     )
@@ -579,7 +580,7 @@ if __name__ == "__main__":
     )
     '''
     trainer = L.Trainer(
-        max_epochs=60,             # Increased for generic mode
+        max_epochs=80,             # Increased for generic mode
         accelerator="gpu",
         devices=1,
         precision="32-true",

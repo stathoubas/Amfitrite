@@ -259,7 +259,7 @@ class HABLightningModel(L.LightningModule):
         self.log_dict(output)
         self.val_metrics.reset()
     
-    '''    
+        
     def configure_optimizers(self):
         # 1. Use self.hparams.lr to grab the value you passed in __init__
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -285,7 +285,7 @@ class HABLightningModel(L.LightningModule):
     def configure_optimizers(self):
         # Using AdamW as it is better for transformers/modern CNNs
         return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
-
+    '''
 
 def prepare_dataset_registry_and_split(excel_path, data_root, output_registry_path):
     """
@@ -472,7 +472,7 @@ if __name__ == "__main__":
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
-    output_path = "/home/kostas/AMFITRITE/res50_2_classes/results1"
+    output_path = "/home/kostas/AMFITRITE/res50_2_classes/results2"
     Logger_path = output_path
     batch_size = 64
     num_workers = 8
@@ -491,7 +491,7 @@ if __name__ == "__main__":
     
 
     # --- 2. SETUP MODEL & LOGGER ---
-    model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
+    model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
     #model = HABLightningModel(mode='s2', lr=1e-5, weights_path=r'/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet50_S2-L1C_13_bands/B13_rn50_moco_0099_ckpt.pth')
 
     

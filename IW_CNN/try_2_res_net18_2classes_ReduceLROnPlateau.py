@@ -468,12 +468,12 @@ if __name__ == "__main__":
     
     # --- 1. SETUP DATA ---
     # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
-    EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
-    DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
-    registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results4"
+    EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
+    DATA_ROOT = "/home/kostas/AMFITRITE/data"
+    registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
+    output_path = "/home/kostas/AMFITRITE/res18_2classes/results11"
     Logger_path = output_path
-    batch_size = 32
+    batch_size = 64
     num_workers = 8
 
     df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)

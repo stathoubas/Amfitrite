@@ -1,0 +1,5 @@
+# Ignore emacs/editor backup files
+*~
+
+# Ignore local logs and scripts folder
+local_scripts/

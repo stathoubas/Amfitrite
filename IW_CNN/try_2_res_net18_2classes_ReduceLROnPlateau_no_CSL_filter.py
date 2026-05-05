@@ -449,39 +449,13 @@ if __name__ == "__main__":
     
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on device: {DEVICE}")
-
-    """    
-    # --- 1. SETUP DATA ---
-    # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
-    EXCEL_PATH = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary.xlsx"
-    DATA_ROOT = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\data"
-    registry_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD\dataset_summary_with_splits.xlsx"
-    output_path = r"C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\res18_2classes\results4"
-    Logger_path = output_path
-    batch_size = 32
-    num_workers = 8
-
-    df = prepare_dataset_registry_and_split(EXCEL_PATH, DATA_ROOT, registry_path)
     
-    train_ds = HABDataset(df, DATA_ROOT, mode='training')
-    val_ds = HABDataset(df, DATA_ROOT, mode='validation')
-    test_ds = HABDataset(df, DATA_ROOT, mode='test')
-    
-    # Batch Size 8 for 4GB GPU
-    train_loader = torch.utils.data.DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, persistent_workers=True)
-    val_loader = torch.utils.data.DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-    test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
-
-    # --- 2. SETUP MODEL & LOGGER ---
-    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
-    model = HABLightningModel(mode='s2', lr=1e-4, weights_path=r'C:\Users\KostasPikounis\OneDrive_Inlecom_Personal\OneDrive - INLECOM\Amfitrite\task2\IWD CNN\pretrained_model_weights\MoCo_ResNet18_S2-L1C 13 bands\B13_rn18_moco_0099_ckpt.pth')
-    """
     # --- 1. SETUP DATA ---
     # Ensure Block 1 functions (prepare_dataset...) are defined above or imported
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
     registry_path = "/home/kostas/AMFITRITE/dataset_summary_with_splits.xlsx"
-    output_path = "/home/kostas/AMFITRITE/res18_2classes/results7"
+    output_path = "/home/kostas/AMFITRITE/res18_2classes/results9"
     Logger_path = output_path
     batch_size = 64
     num_workers = 8
@@ -498,8 +472,8 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, persistent_workers=True)
 
     # --- 2. SETUP MODEL & LOGGER ---
-    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-4)
-    #model = HABLightningModel(mode='s2', lr=1e-4, weights_path='/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth')
+    #model = HABLightningModel(mode="generic", weights_path = None, lr=1e-5)
+    model = HABLightningModel(mode='s2', lr=1e-4, weights_path='/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth')
 
     logger = CSVLogger(output_path, name="hab_experiment")
     
