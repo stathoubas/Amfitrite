@@ -322,8 +322,8 @@ if __name__ == "__main__":
     WEIGHTS = {
         'generic': None,
         's2': '/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth',
-        'iw': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt',
-        'iw': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt'
+        'iw1': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt',
+        'iw2': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt'
     }
 
     all_results = []
