@@ -286,7 +286,7 @@ def run_experiment(mode, weights_path, base_output_dir, train_loader, val_loader
 
     # 3. Train
     trainer = L.Trainer(
-        max_epochs=60,
+        max_epochs=150,
         accelerator="gpu",
         devices=1,
         precision="32-true",
