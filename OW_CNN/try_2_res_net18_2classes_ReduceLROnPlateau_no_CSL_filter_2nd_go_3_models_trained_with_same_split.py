@@ -109,7 +109,13 @@ class HABLightningModel(L.LightningModule):
 
     def _build_model(self, mode, weights_path):
         model = models.resnet18(weights=None)
+        
+        # 1. Stem Surgery: Change input to 12 channels
         model.conv1 = nn.Conv2d(12, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        
+        # 2. Head Surgery: Change output to 2 classes FIRST (Before loading weights)
+        num_ftrs = model.fc.in_features
+        model.fc = nn.Linear(num_ftrs, 2)
         
         if mode == 'generic':
             print("  -> Mode: Generic (Inflating ImageNet weights)")
@@ -117,8 +123,13 @@ class HABLightningModel(L.LightningModule):
             with torch.no_grad():
                 w_avg = temp_resnet.conv1.weight.mean(dim=1, keepdim=True)
                 model.conv1.weight.copy_(w_avg.repeat(1, 12, 1, 1))
+            
             state_dict = temp_resnet.state_dict()
+            # Remove keys that would cause shape mismatches
             del state_dict['conv1.weight']
+            del state_dict['fc.weight']
+            del state_dict['fc.bias']
+            
             model.load_state_dict(state_dict, strict=False)
                 
         elif mode == 's2':
@@ -128,10 +139,16 @@ class HABLightningModel(L.LightningModule):
             new_state_dict = {}
             for k, v in state_dict.items():
                 name = k.replace('module.', '').replace('backbone.', '')
+                
+                # Skip fc layer from S2 to avoid 1000 vs 2 class mismatch
+                if 'fc.' in name:
+                    continue 
+                    
                 if name == 'conv1.weight' and v.shape[1] == 13:
                     keep_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]
                     v = v[:, keep_indices, :, :]
                 new_state_dict[name] = v
+                
             model.load_state_dict(new_state_dict, strict=False)
             
         elif mode == 'iw':
@@ -139,18 +156,26 @@ class HABLightningModel(L.LightningModule):
             ckpt = torch.load(weights_path, map_location='cpu')
             state_dict = ckpt['state_dict']
             new_state_dict = {}
+            
             for k, v in state_dict.items():
-                if k.startswith('model.'):
-                    new_state_dict[k.replace('model.', '')] = v
+                name = k.replace('model.', '')
+                
+                # Dynamically pad the 10-channel IW weights to 12 channels
+                if name == 'conv1.weight' and v.shape[1] == 10:
+                    # Create a blank 12-channel tensor
+                    new_conv1 = torch.zeros([64, 12, 7, 7], dtype=v.dtype)
+                    # Copy the 10 known channels into the first 10 slots
+                    new_conv1[:, :10, :, :] = v
+                    # Fill the remaining 2 slots with the average of the 10 channels
+                    new_conv1[:, 10:, :, :] = v.mean(dim=1, keepdim=True).repeat(1, 2, 1, 1)
+                    v = new_conv1
+                    
+                new_state_dict[name] = v
+                
+            # strict=False allows it to load smoothly. Since model.fc is already [2, 512],
+            # the IW fc.weight [2, 512] will snap in perfectly.
             model.load_state_dict(new_state_dict, strict=False)
 
-        num_ftrs = model.fc.in_features
-        model.fc = nn.Linear(num_ftrs, 2)
-        
-        if mode == 'iw':
-            model.fc.weight.data.copy_(new_state_dict['fc.weight'])
-            model.fc.bias.data.copy_(new_state_dict['fc.bias'])
-            
         return model
 
     def forward(self, x):
