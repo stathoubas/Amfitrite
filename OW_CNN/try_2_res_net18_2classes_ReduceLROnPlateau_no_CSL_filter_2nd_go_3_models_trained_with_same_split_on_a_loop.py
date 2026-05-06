@@ -237,6 +237,10 @@ def evaluate_split(model, loader, device, split_name="Test", output_dir="plots")
     acc = accuracy_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds, average='macro')
     
+    print(f"\n--- Results for {split_name} ---")
+    print(classification_report(all_labels, all_preds, target_names=["NonHAB", "HAB"], zero_division=0))
+    print("--- Breakdown by Stratification Category ---")
+    
     results = pd.DataFrame({'Actual': all_labels, 'Predicted': all_preds, 'Category': all_cats})
     results['Correct'] = results['Actual'] == results['Predicted']
     
@@ -280,7 +284,7 @@ def run_experiment(exp_name, base_mode, run_id, weights_path, base_output_dir, t
     early_stop_callback = EarlyStopping(monitor="val_f1", patience=20, mode="max", verbose=False)    
 
     trainer = L.Trainer(
-        max_epochs=60, accelerator="gpu", devices=1, precision="32-true",
+        max_epochs=100, accelerator="gpu", devices=1, precision="32-true",
         logger=logger, callbacks=[checkpoint_callback, early_stop_callback],
         enable_progress_bar=False 
     )
