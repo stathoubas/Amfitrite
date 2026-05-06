@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed May  6 17:06:18 2026
+Created on Wed May  6 22:19:48 2026
 
 @author: K. Pikounis
 
 Stability & Meta-Analysis Pipeline for Amfitrite Open Waters
-Runs N iterations with different random splits and statistically evaluates generic, s2, and iw models.
+Supports multiple checkpoints for the same architecture (e.g., iw1, iw2).
 """
 
 import os
@@ -185,7 +185,6 @@ class HABLightningModel(L.LightningModule):
 # --- PIPELINE FUNCTIONS ---
 
 def get_or_create_split(excel_path, data_root, registry_path, random_seed):
-    """Creates a unique split based on the random seed."""
     if os.path.exists(registry_path):
         return pd.read_csv(registry_path)
 
@@ -212,7 +211,6 @@ def get_or_create_split(excel_path, data_root, registry_path, random_seed):
 
     valid_df = df.loc[valid_indices].copy()
     
-    # Use the dynamic seed to ensure different splits per run!
     train_idx, temp_idx = train_test_split(valid_df.index, test_size=0.30, stratify=valid_df['strat_category'], random_state=random_seed)
     val_idx, test_idx = train_test_split(temp_idx, test_size=0.50, stratify=valid_df.loc[temp_idx, 'strat_category'], random_state=random_seed)
     
@@ -224,7 +222,6 @@ def get_or_create_split(excel_path, data_root, registry_path, random_seed):
     return df
 
 def evaluate_split(model, loader, device, split_name="Test", output_dir="plots"):
-    """Evaluates the model and returns a dictionary of extracted metrics."""
     model.eval()
     all_preds, all_labels, all_cats = [], [], []
     
@@ -237,28 +234,21 @@ def evaluate_split(model, loader, device, split_name="Test", output_dir="plots")
             all_labels.extend(labels.cpu().numpy())
             all_cats.extend(cats)
             
-    # Calculate Standard Metrics
     acc = accuracy_score(all_labels, all_preds)
     f1 = f1_score(all_labels, all_preds, average='macro')
     
     results = pd.DataFrame({'Actual': all_labels, 'Predicted': all_preds, 'Category': all_cats})
     results['Correct'] = results['Actual'] == results['Predicted']
     
-    metrics_dict = {
-        'split': split_name,
-        'accuracy': acc,
-        'f1_macro': f1
-    }
+    metrics_dict = {'split': split_name, 'accuracy': acc, 'f1_macro': f1}
     
-    # Calculate Category-Specific Metrics
     for cat in ["hab", "nonhab", "land", "clouds"]:
         cat_data = results[results['Category'] == cat]
         if not cat_data.empty:
             metrics_dict[f'{cat}_acc'] = cat_data['Correct'].mean()
         else:
-            metrics_dict[f'{cat}_acc'] = np.nan # Handle empty classes safely
+            metrics_dict[f'{cat}_acc'] = np.nan
 
-    # Confusion Matrix Plot
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=["NonHAB", "HAB"], yticklabels=["NonHAB", "HAB"])
@@ -270,14 +260,18 @@ def evaluate_split(model, loader, device, split_name="Test", output_dir="plots")
     
     return metrics_dict
 
-def run_experiment(mode, run_id, weights_path, base_output_dir, train_loader, val_loader, test_loader, train_eval_loader, device):
-    """Runs one specific configuration and returns its metrics."""
-    output_dir = f"{base_output_dir}_{run_id}_{mode}"
+def run_experiment(exp_name, base_mode, run_id, weights_path, base_output_dir, train_loader, val_loader, test_loader, train_eval_loader, device):
+    """
+    exp_name: The unique string identifier (e.g., 'iw1', 's2') used for folders and stat tracking.
+    base_mode: The architectural mode (e.g., 'iw', 's2') used by the Lightning Module.
+    """
+    output_dir = f"{base_output_dir}_{run_id}_{exp_name}"
     if not os.path.exists(output_dir): os.makedirs(output_dir)
         
-    print(f"\n[{run_id}/10] Training Mode: {mode.upper()} -> Output: {output_dir}")
+    print(f"\n[{run_id}/10] Training Experiment: {exp_name.upper()} (Architecture: {base_mode}) -> Output: {output_dir}")
 
-    model = HABLightningModel(mode=mode, lr=1e-4, weights_path=weights_path)
+    # Pass base_mode to build the model correctly
+    model = HABLightningModel(mode=base_mode, lr=1e-4, weights_path=weights_path)
     logger = CSVLogger(output_dir, name="logs")
     checkpoint_callback = ModelCheckpoint(
         monitor="val_f1", mode="max", save_top_k=1, save_last=True, 
@@ -285,7 +279,6 @@ def run_experiment(mode, run_id, weights_path, base_output_dir, train_loader, va
     )
     early_stop_callback = EarlyStopping(monitor="val_f1", patience=20, mode="max", verbose=False)    
 
-    # Hide progress bar to keep logs clean during 30 runs, but log normally
     trainer = L.Trainer(
         max_epochs=60, accelerator="gpu", devices=1, precision="32-true",
         logger=logger, callbacks=[checkpoint_callback, early_stop_callback],
@@ -293,11 +286,9 @@ def run_experiment(mode, run_id, weights_path, base_output_dir, train_loader, va
     )
     trainer.fit(model, train_loader, val_loader)
 
-    # Load best model for evaluation
     best_model = HABLightningModel.load_from_checkpoint(checkpoint_callback.best_model_path)
     best_model.to(device)
     
-    # Extract Metrics
     train_mets = evaluate_split(best_model, train_eval_loader, device, split_name="Train", output_dir=output_dir)
     val_mets = evaluate_split(best_model, val_loader, device, split_name="Validation", output_dir=output_dir)
     test_mets = evaluate_split(best_model, test_loader, device, split_name="Test", output_dir=output_dir)
@@ -320,22 +311,25 @@ if __name__ == "__main__":
     NUM_WORKERS = 8
     TOTAL_RUNS = 10
     
+    # 1. Define your architecture families
+    MODES_TO_RUN = ['generic', 's2', 'iw', 'iw']
+    
+    # 2. Define your actual specific experiments
     WEIGHTS = {
         'generic': None,
         's2': '/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth',
+        'iw': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt',
         'iw': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt'
     }
 
     all_results = []
-    modes_to_run = ['generic', 's2', 'iw']
 
-    # --- 1. THE ITERATION LOOP ---
+    # --- THE ITERATION LOOP ---
     for run_id in range(1, TOTAL_RUNS + 1):
         print("\n" + "="*60)
         print(f"STARTING STABILITY RUN {run_id}/{TOTAL_RUNS}")
         print("="*60)
         
-        # New seed per run guarantees a new random split
         random_seed = 42 + run_id
         registry_path = f"./ow_summary_with_splits_run{run_id}.csv"
         
@@ -350,33 +344,40 @@ if __name__ == "__main__":
         test_loader = torch.utils.data.DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
         train_eval_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
         
-        for current_mode in modes_to_run:
+        # Iterate over the specific experiment configurations
+        for exp_name, w_path in WEIGHTS.items():
+            
+            # Figure out which base architecture mode this experiment belongs to
+            base_mode = next((m for m in MODES_TO_RUN if exp_name.startswith(m)), None)
+            if not base_mode:
+                raise ValueError(f"Experiment '{exp_name}' does not start with any known mode from {MODES_TO_RUN}")
+
             train_mets, val_mets, test_mets = run_experiment(
-                mode=current_mode, run_id=run_id, weights_path=WEIGHTS[current_mode],
+                exp_name=exp_name, base_mode=base_mode, run_id=run_id, weights_path=w_path,
                 base_output_dir=BASE_OUTPUT_DIR, train_loader=train_loader, val_loader=val_loader,
                 test_loader=test_loader, train_eval_loader=train_eval_loader, device=DEVICE
             )
             
-            # Package results for the DataFrame
+            # Package results for the DataFrame using 'experiment' name
             for mets in [train_mets, val_mets, test_mets]:
                 mets['run_id'] = run_id
-                mets['mode'] = current_mode
+                mets['experiment'] = exp_name
                 all_results.append(mets)
 
-    # --- 2. STATISTICAL META-ANALYSIS ---
+    # --- STATISTICAL META-ANALYSIS ---
     print("\n" + "="*60)
     print("ALL RUNS COMPLETE. CALCULATING STATISTICS...")
     print("="*60)
     
     results_df = pd.DataFrame(all_results)
     
-    # Reorder columns for readability
-    cols = ['mode', 'split', 'run_id', 'f1_macro', 'accuracy', 'hab_acc', 'nonhab_acc', 'land_acc', 'clouds_acc']
+    # Reorder columns
+    cols = ['experiment', 'split', 'run_id', 'f1_macro', 'accuracy', 'hab_acc', 'nonhab_acc', 'land_acc', 'clouds_acc']
     results_df = results_df[cols]
     
-    # 1. Mean and Std Dev for all metrics (Grouped by Mode and Split)
+    # 1. Mean and Std Dev for all metrics (Grouped by Experiment and Split)
     numeric_cols = ['f1_macro', 'accuracy', 'hab_acc', 'nonhab_acc', 'land_acc', 'clouds_acc']
-    summary_stats = results_df.groupby(['mode', 'split'])[numeric_cols].agg(['mean', 'std'])
+    summary_stats = results_df.groupby(['experiment', 'split'])[numeric_cols].agg(['mean', 'std'])
     
     print("\n--- MEAN & STD DEVIATION ACROSS 10 SPLITS ---")
     print(summary_stats.to_string())
@@ -385,21 +386,18 @@ if __name__ == "__main__":
     results_df.to_csv("./stability_raw_results.csv", index=False)
     summary_stats.to_csv("./stability_summary_stats.csv")
     
-    # 2. Win Rate Analysis (Which model performs best on the TEST set per run?)
+    # 2. Win Rate Analysis
     test_df = results_df[results_df['split'] == 'Test']
+    pivot_f1 = test_df.pivot(index='run_id', columns='experiment', values='f1_macro')
     
-    # Pivot to easily compare F1 scores across modes for the same run
-    pivot_f1 = test_df.pivot(index='run_id', columns='mode', values='f1_macro')
-    
-    # Find which mode had the highest F1 in each row (run)
     winners = pivot_f1.idxmax(axis=1)
     win_counts = winners.value_counts()
     
     print("\n--- WIN RATE ANALYSIS (Highest Test F1 Score) ---")
     print(f"Total Runs Analyzed: {TOTAL_RUNS}")
-    for mode in modes_to_run:
-        wins = win_counts.get(mode, 0)
+    for exp_name in WEIGHTS.keys():
+        wins = win_counts.get(exp_name, 0)
         win_rate = (wins / TOTAL_RUNS) * 100
-        print(f"Mode '{mode.upper()}': Won {wins} times ({win_rate:.1f}% Win Rate)")
+        print(f"Experiment '{exp_name.upper()}': Won {wins} times ({win_rate:.1f}% Win Rate)")
         
     print("\nAnalysis Saved: 'stability_raw_results.csv' and 'stability_summary_stats.csv'")
