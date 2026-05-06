@@ -33,6 +33,7 @@ from sklearn.metrics import confusion_matrix, classification_report
 from pytorch_lightning.loggers import CSVLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 
+# --- DATASET & MODEL DEFINITIONS ---
 
 class HABDataset(Dataset):
     def __init__(self, dataframe, root_dir, mode='training'):
@@ -110,10 +111,10 @@ class HABLightningModel(L.LightningModule):
     def _build_model(self, mode, weights_path):
         model = models.resnet18(weights=None)
         
-        # 1. Stem Surgery: Change input to 12 channels
+        # Stem Surgery: Change input to 12 channels
         model.conv1 = nn.Conv2d(12, 64, kernel_size=7, stride=2, padding=3, bias=False)
         
-        # 2. Head Surgery: Change output to 2 classes FIRST (Before loading weights)
+        # Head Surgery: Change output to 2 classes FIRST (Before loading weights)
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, 2)
         
@@ -125,11 +126,9 @@ class HABLightningModel(L.LightningModule):
                 model.conv1.weight.copy_(w_avg.repeat(1, 12, 1, 1))
             
             state_dict = temp_resnet.state_dict()
-            # Remove keys that would cause shape mismatches
             del state_dict['conv1.weight']
             del state_dict['fc.weight']
             del state_dict['fc.bias']
-            
             model.load_state_dict(state_dict, strict=False)
                 
         elif mode == 's2':
@@ -139,16 +138,12 @@ class HABLightningModel(L.LightningModule):
             new_state_dict = {}
             for k, v in state_dict.items():
                 name = k.replace('module.', '').replace('backbone.', '')
-                
-                # Skip fc layer from S2 to avoid 1000 vs 2 class mismatch
                 if 'fc.' in name:
                     continue 
-                    
                 if name == 'conv1.weight' and v.shape[1] == 13:
                     keep_indices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12]
                     v = v[:, keep_indices, :, :]
                 new_state_dict[name] = v
-                
             model.load_state_dict(new_state_dict, strict=False)
             
         elif mode == 'iw':
@@ -159,21 +154,13 @@ class HABLightningModel(L.LightningModule):
             
             for k, v in state_dict.items():
                 name = k.replace('model.', '')
-                
-                # Dynamically pad the 10-channel IW weights to 12 channels
                 if name == 'conv1.weight' and v.shape[1] == 10:
-                    # Create a blank 12-channel tensor
                     new_conv1 = torch.zeros([64, 12, 7, 7], dtype=v.dtype)
-                    # Copy the 10 known channels into the first 10 slots
                     new_conv1[:, :10, :, :] = v
-                    # Fill the remaining 2 slots with the average of the 10 channels
                     new_conv1[:, 10:, :, :] = v.mean(dim=1, keepdim=True).repeat(1, 2, 1, 1)
                     v = new_conv1
-                    
                 new_state_dict[name] = v
                 
-            # strict=False allows it to load smoothly. Since model.fc is already [2, 512],
-            # the IW fc.weight [2, 512] will snap in perfectly.
             model.load_state_dict(new_state_dict, strict=False)
 
         return model
@@ -210,9 +197,9 @@ class HABLightningModel(L.LightningModule):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.1, patience=5)
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "monitor": "val_f1"}}
 
+# --- PIPELINE FUNCTIONS ---
 
 def get_or_create_split(excel_path, data_root, registry_path):
-    """Creates the split ONLY if it doesn't exist yet."""
     if os.path.exists(registry_path):
         print(f"[*] Found existing split registry at: {registry_path}. Loading...")
         return pd.read_csv(registry_path)
@@ -241,7 +228,6 @@ def get_or_create_split(excel_path, data_root, registry_path):
             valid_indices.append(idx)
 
     valid_df = df.loc[valid_indices].copy()
-    
     train_idx, temp_idx = train_test_split(valid_df.index, test_size=0.30, stratify=valid_df['strat_category'], random_state=42)
     val_idx, test_idx = train_test_split(temp_idx, test_size=0.50, stratify=valid_df.loc[temp_idx, 'strat_category'], random_state=42)
     
@@ -252,6 +238,72 @@ def get_or_create_split(excel_path, data_root, registry_path):
     df.to_csv(registry_path, index=False)
     print(f"[*] Split created and saved to {registry_path}")
     return df
+
+def plot_training_history(csv_path, output_dir="plots"):
+    """Reads the CSV log and saves 5 specific plots, robust to column naming."""
+    if not os.path.exists(output_dir): os.makedirs(output_dir)
+    try:
+        metrics = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        print(f"Could not find log file at {csv_path}. Skipping plots.")
+        return
+
+    def find_col(prefix, label):
+        candidates = [c for c in metrics.columns if prefix in c and label in c]
+        if candidates: return candidates[0]
+        return None
+
+    def save_plot(train_col_candidate, val_col_candidate, title, filename):
+        plt.figure(figsize=(10, 6))
+        
+        if "per_class" in train_col_candidate:
+            label = train_col_candidate.split("_")[-1] 
+            metric_train = find_col("train", label)
+            metric_val = find_col("val", label)
+        else:
+            metric_train = train_col_candidate
+            metric_val = val_col_candidate
+
+        if metric_train and metric_val and metric_train in metrics.columns and metric_val in metrics.columns:
+            clean_train = metrics[[metric_train, 'epoch']].dropna()
+            clean_val = metrics[[metric_val, 'epoch']].dropna()
+            
+            plt.plot(clean_train['epoch'], clean_train[metric_train], label='Train', marker='o')
+            plt.plot(clean_val['epoch'], clean_val[metric_val], label='Validation', marker='o')
+            
+            plt.title(title)
+            plt.xlabel("Epochs")
+            plt.ylabel("Score")
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.savefig(f"{output_dir}/{filename}")
+            plt.close()
+            print(f"Saved Plot: {filename}")
+        else:
+            print(f"Skipping {filename}: Could not find columns for {title}")
+
+    save_plot('train_loss_epoch', 'val_loss', "Overall Loss", "1_loss_curve.png")
+    save_plot('train_f1', 'val_f1', "Macro F1 Score (Balance)", "2_f1_curve.png")
+
+    plt.figure(figsize=(10, 6))
+    if 'val_acc' in metrics.columns and 'val_bal_acc' in metrics.columns:
+        clean_data = metrics[['epoch', 'val_acc', 'val_bal_acc']].dropna()
+        plt.plot(clean_data['epoch'], clean_data['val_acc'], label='Standard Accuracy (Micro)', marker='o', linestyle='--')
+        plt.plot(clean_data['epoch'], clean_data['val_bal_acc'], label='Balanced Accuracy (Macro)', marker='o', linewidth=2)
+        plt.title("Standard vs Balanced Accuracy")
+        plt.xlabel("Epochs")
+        plt.ylabel("Accuracy")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"{output_dir}/3_acc_comparison.png")
+        plt.close()
+        print("Saved Plot: 3_acc_comparison.png")
+
+    # The labels are now "NonHAB" and "HAB"
+    save_plot('train_per_class_NonHAB', 'val_per_class_NonHAB', 
+              "Accuracy: NonHAB Class (Specificity - True Negative Rate)", "4_acc_nonhab_curve.png")
+    save_plot('train_per_class_HAB', 'val_per_class_HAB', 
+             "Accuracy: HAB Class (Recall - True Positive Rate)", "5_acc_hab_curve.png")
 
 def evaluate_split(model, loader, device, split_name="Test", output_dir="plots"):
     model.eval()
@@ -287,8 +339,7 @@ def evaluate_split(model, loader, device, split_name="Test", output_dir="plots")
     plt.savefig(f"{output_dir}/cm_{split_name.lower()}.png")
     plt.close()
 
-def run_experiment(mode, weights_path, base_output_dir, train_loader, val_loader, test_loader, device):
-    """Wrapper that handles the entire lifecycle of a single model configuration."""
+def run_experiment(mode, weights_path, base_output_dir, train_loader, val_loader, test_loader, train_eval_loader, device):
     output_dir = f"{base_output_dir}_{mode}"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -298,20 +349,16 @@ def run_experiment(mode, weights_path, base_output_dir, train_loader, val_loader
     print(f"Output Directory: {output_dir}")
     print("="*50)
 
-    # 1. Init Model
     model = HABLightningModel(mode=mode, lr=1e-4, weights_path=weights_path)
-
-    # 2. Setup Logging & Callbacks
     logger = CSVLogger(output_dir, name="logs")
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_f1", mode="max", save_top_k=20, save_last=True, 
+        monitor="val_f1", mode="max", save_top_k=1, save_last=True, 
         filename="best-hab-{epoch:02d}-{val_f1:.3f}"
     )
     early_stop_callback = EarlyStopping(monitor="val_f1", patience=20, mode="max", verbose=True)    
 
-    # 3. Train
     trainer = L.Trainer(
-        max_epochs=150,
+        max_epochs=60,
         accelerator="gpu",
         devices=1,
         precision="32-true",
@@ -320,27 +367,29 @@ def run_experiment(mode, weights_path, base_output_dir, train_loader, val_loader
     )
     trainer.fit(model, train_loader, val_loader)
 
-    # 4. Evaluate Best Model
+    # Plot metrics
+    metrics_path = f"{logger.log_dir}/metrics.csv"
+    print("\n[*] Generating Plots...")
+    plot_training_history(metrics_path, output_dir=output_dir)
+
     print(f"\n[*] Loading Best {mode.upper()} Model from: {checkpoint_callback.best_model_path}")
     best_model = HABLightningModel.load_from_checkpoint(checkpoint_callback.best_model_path)
     best_model.to(device)
     
+    # Evaluate Train, Validation, and Test
+    evaluate_split(best_model, train_eval_loader, device, split_name="Train", output_dir=output_dir)
     evaluate_split(best_model, val_loader, device, split_name="Validation", output_dir=output_dir)
     evaluate_split(best_model, test_loader, device, split_name="Test", output_dir=output_dir)
     
-    # Clean up memory before the next run
     del model, best_model, trainer
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    if torch.cuda.is_available(): torch.cuda.empty_cache()
 
 # --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Hardware initialized on: {DEVICE}")
     
-    # --- CONFIGURATION ---
     CSV_PATH = "/home/kostas/AMFITRITE/OWdata/amfitrite_open_waters_master.csv"
     DATA_ROOT = "/home/kostas/AMFITRITE/OWdata"
     REGISTRY_PATH = "/home/kostas/AMFITRITE/OWdata/ow_summary_with_splits.csv"  # The unified split file
@@ -348,25 +397,26 @@ if __name__ == "__main__":
     BATCH_SIZE = 64
     NUM_WORKERS = 8
     
-    # Define Weights Paths
     WEIGHTS = {
         'generic': None,
         's2': '/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth',
         'iw': '/home/kostas/AMFITRITE/IW/res18_2classes/results12/hab_experiment/version_0/checkpoints/best-hab-epoch=26-val_f1=0.881.ckpt'
     }
 
-    # --- 1. SETUP SHARED DATALOADERS ---
     df = get_or_create_split(CSV_PATH, DATA_ROOT, REGISTRY_PATH)
 
     train_ds = HABDataset(df, DATA_ROOT, mode='training')
     val_ds = HABDataset(df, DATA_ROOT, mode='validation')
     test_ds = HABDataset(df, DATA_ROOT, mode='test')
 
+    # DataLoaders for Training
     train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, persistent_workers=True)
     val_loader = torch.utils.data.DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
     test_loader = torch.utils.data.DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
+    
+    # Non-shuffled DataLoader specifically for evaluating the training set (Clean Confusion Matrix)
+    train_eval_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
 
-    # --- 2. RUN ALL THREE EXPERIMENTS ---
     modes_to_run = ['generic', 's2', 'iw']
     
     for current_mode in modes_to_run:
@@ -377,6 +427,7 @@ if __name__ == "__main__":
             train_loader=train_loader,
             val_loader=val_loader,
             test_loader=test_loader,
+            train_eval_loader=train_eval_loader,
             device=DEVICE
         )
         
