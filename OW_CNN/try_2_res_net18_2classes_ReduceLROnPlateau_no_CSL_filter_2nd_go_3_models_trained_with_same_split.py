@@ -279,7 +279,7 @@ def run_experiment(mode, weights_path, base_output_dir, train_loader, val_loader
     # 2. Setup Logging & Callbacks
     logger = CSVLogger(output_dir, name="logs")
     checkpoint_callback = ModelCheckpoint(
-        monitor="val_f1", mode="max", save_top_k=1, save_last=True, 
+        monitor="val_f1", mode="max", save_top_k=20, save_last=True, 
         filename="best-hab-{epoch:02d}-{val_f1:.3f}"
     )
     early_stop_callback = EarlyStopping(monitor="val_f1", patience=20, mode="max", verbose=True)    
