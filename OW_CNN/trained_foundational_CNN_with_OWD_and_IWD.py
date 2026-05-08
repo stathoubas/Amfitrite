@@ -362,7 +362,13 @@ class HABLightningSystem(L.LightningModule):
         # 3. Overall Standard Metrics
         self.train_f1 = MulticlassF1Score(num_classes=2, average='macro')
         self.val_f1 = MulticlassF1Score(num_classes=2, average='macro')
+        
+        self.train_acc = MulticlassAccuracy(num_classes=2, average='micro')
         self.val_acc = MulticlassAccuracy(num_classes=2, average='micro')
+        
+        # 4: Balanced Accuracy (Macro Average Accuracy)
+        self.train_bal_acc = MulticlassAccuracy(num_classes=2, average='macro')
+        self.val_bal_acc = MulticlassAccuracy(num_classes=2, average='macro')
         
         # 4. Storage for granular sub-domain tracking
         self.validation_step_outputs = []
@@ -371,15 +377,20 @@ class HABLightningSystem(L.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        x, y, _ = batch  # Ignore strat_group during basic training step
+        x, y, _ = batch  
         logits = self(x)
         loss = self.criterion(logits, y)
         
         preds = torch.argmax(logits, dim=1)
         self.train_f1(preds, y)
+        self.train_acc(preds, y)
+        self.train_bal_acc(preds, y)
         
         self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log("train_f1_macro", self.train_f1, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train_acc", self.train_acc, on_step=False, on_epoch=True)
+        self.log("train_bal_acc", self.train_bal_acc, on_step=False, on_epoch=True)
+        
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -390,10 +401,10 @@ class HABLightningSystem(L.LightningModule):
         preds = torch.argmax(logits, dim=1)
         self.val_f1(preds, y)
         self.val_acc(preds, y)
+        self.val_bal_acc(preds, y) 
         
         self.log("val_loss", loss, on_epoch=True, prog_bar=True)
         
-        # Save predictions and metadata for end-of-epoch granular calculation
         self.validation_step_outputs.append({
             'preds': preds.cpu(),
             'targets': y.cpu(),
@@ -406,34 +417,30 @@ class HABLightningSystem(L.LightningModule):
         # 1. Log overall metrics
         self.log("val_f1_macro", self.val_f1.compute(), prog_bar=True)
         self.log("val_acc_overall", self.val_acc.compute())
+        self.log("val_bal_acc", self.val_bal_acc.compute()) 
         
         # 2. Extract all batches
         all_preds = torch.cat([x['preds'] for x in self.validation_step_outputs])
         all_targets = torch.cat([x['targets'] for x in self.validation_step_outputs])
-        
-        # Flatten the list of group tuples
         all_groups = [g for x in self.validation_step_outputs for g in x['groups']]
         
         # 3. Calculate accuracy for every specific sub-domain
         unique_groups = ['iw_hab', 'ow_hab', 'iw_nonhab', 'ow_nonhab', 'land', 'clouds']
         
         for group in unique_groups:
-            # Find indices where the item belongs to the current group
             indices = [i for i, g in enumerate(all_groups) if g == group]
-            
             if len(indices) > 0:
                 group_preds = all_preds[indices]
                 group_targets = all_targets[indices]
-                
-                # Accuracy = (Correct Predictions) / (Total Predictions in this group)
                 acc = (group_preds == group_targets).float().mean()
                 self.log(f"val_{group}_acc", acc)
             else:
-                self.log(f"val_{group}_acc", 0.0) # Fallback if a batch is weirdly empty
+                self.log(f"val_{group}_acc", 0.0)
 
         # 4. Reset for the next epoch
         self.val_f1.reset()
         self.val_acc.reset()
+        self.val_bal_acc.reset()
         self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
@@ -454,7 +461,7 @@ class HABLightningSystem(L.LightningModule):
 
 
 def plot_training_history(csv_path, output_dir):
-    """Reads metrics.csv and plots Loss, F1, and granular sub-domain accuracies."""
+    """Reads metrics.csv and plots Loss, F1, Accuracy, Balanced Accuracy, and Sub-domain accuracies."""
     if not os.path.exists(csv_path):
         print(f"Metrics not found at {csv_path}")
         return
@@ -478,7 +485,8 @@ def plot_training_history(csv_path, output_dir):
     # 1. Standard Curves
     save_plot(['train_loss', 'val_loss'], ['Train Loss', 'Val Loss'], 'Loss Curve', '1_loss.png')
     save_plot(['train_f1_macro', 'val_f1_macro'], ['Train F1', 'Val F1'], 'Macro F1 Score', '2_f1_macro.png')
-    save_plot(['val_acc_overall'], ['Val Accuracy'], 'Overall Accuracy', '3_accuracy.png')
+    save_plot(['train_acc', 'val_acc_overall'], ['Train Accuracy', 'Val Accuracy'], 'Overall Accuracy (Micro)', '3_accuracy.png')
+    save_plot(['train_bal_acc', 'val_bal_acc'], ['Train Balanced Acc', 'Val Balanced Acc'], 'Balanced Accuracy (Macro)', '4_balanced_accuracy.png')
 
     # 2. Granular Sub-Domain Validation Curves
     granular_metrics = [
@@ -487,7 +495,7 @@ def plot_training_history(csv_path, output_dir):
         'val_land_acc', 'val_clouds_acc'
     ]
     labels = ['IW HAB', 'OW HAB', 'IW nonHAB', 'OW nonHAB', 'Land', 'Clouds']
-    save_plot(granular_metrics, labels, 'Validation Accuracy by Sub-Domain', '4_granular_accuracies.png')
+    save_plot(granular_metrics, labels, 'Validation Accuracy by Sub-Domain', '5_granular_accuracies.png')
 
 
 def evaluate_split(model, loader, device, split_name, output_dir):
@@ -626,7 +634,7 @@ if __name__ == "__main__":
         plot_training_history(metrics_csv_path, output_dir)
 
         print(f"\n[*] Evaluating Best Model on all splits...")
-        best_model = HABLightningSystem.load_from_checkpoint(checkpoint_callback.best_model_path)
+        best_model = HABLightningSystem.load_from_checkpoint(checkpoint_callback.best_model_path, class_weights=class_weights)
         best_model.to(DEVICE)
         
         # Create a non-shuffled training loader so the confusion matrix is perfectly ordered
