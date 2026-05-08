@@ -559,7 +559,8 @@ if __name__ == "__main__":
     OW_DIR = "/home/kostas/AMFITRITE/OWdata"
     IW_EXCEL = "/home/kostas/AMFITRITE/dataset_summary_256x256pixels.xlsx"
     OW_CSV = "/home/kostas/AMFITRITE/OWdata/amfitrite_open_waters_master.csv"
-    BASE_OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/stability_bigearthnet_resnet18"
+    #BASE_OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/stability_bigearthnet_resnet18"
+    BASE_OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/stability_s2_resnet18"
         
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("\n" + "="*60)
@@ -572,11 +573,18 @@ if __name__ == "__main__":
     TOTAL_ITERATIONS = 10
     
     # Define the SINGLE model configuration you want to test here
+    #MODEL_CONFIG = {
+    #    'architecture': 'resnet18',
+    #    'num_bands': 10,
+    #    'mode': 'bigearthnet',
+    #    'weights_path': '/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors'
+    #}
+    
     MODEL_CONFIG = {
         'architecture': 'resnet18',
-        'num_bands': 10,
-        'mode': 'bigearthnet',
-        'weights_path': '/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors'
+        'num_bands': 12,
+        'mode': 's2',
+        'weights_path': '/home/kostas/AMFITRITE/pretrained_model_weights/MoCo_ResNet18_S2-L1C_13_bands/B13_rn18_moco_0099_ckpt.pth'
     }
     
     # Run Module 1 (Only need to harmonize once)
