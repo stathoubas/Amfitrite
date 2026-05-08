@@ -170,7 +170,7 @@ if __name__ == "__main__":
     OW_DIR = "/home/kostas/AMFITRITE/OWdata"
     IW_EXCEL = "/home/kostas/AMFITRITE/dataset_summary_256x256pixels.xlsx"
     OW_CSV = "/home/kostas/AMFITRITE/OWdata/amfitrite_open_waters_master.csv"
-    MASTER_OUTPUT = "./amfitrite_universal_split.csv"
+    MASTER_OUTPUT = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
 
     # Run Module 1
     harmonizer = DatasetHarmonizer(IW_DIR, OW_DIR, IW_EXCEL, OW_CSV)
@@ -178,3 +178,5 @@ if __name__ == "__main__":
     
     # Run Module 2
     split_df, loss_weights = create_stratified_split_and_weights(master_dataframe, MASTER_OUTPUT)
+    
+    print(loss_weights)
