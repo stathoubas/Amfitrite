@@ -183,6 +183,41 @@ def create_stratified_split_and_weights(master_df, output_registry_path, random_
     return df, class_weights
 
 # ==============================================================================
+# MODULE 2 changes: load an already sploit dataset and IMBALANCE CALCULATOR
+# ==============================================================================
+
+def load_existing_split_and_get_weights(csv_path):
+    """
+    Loads an already partitioned dataset and calculates the class weights 
+    strictly based on the 'training' split.
+    """
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Could not find the split dataset at {csv_path}")
+        
+    print(f"\n[*] Loading existing split from {csv_path}...")
+    df = pd.read_csv(csv_path)
+    
+    # Extract only the training data to compute weights (prevents data leakage)
+    train_df = df[df['split'] == 'training']
+    
+    count_nonhab = len(train_df[train_df['binary_label'] == 0])
+    count_hab = len(train_df[train_df['binary_label'] == 1])
+    total = count_nonhab + count_hab
+    
+    # Inverse Frequency Weighting Formulation
+    weight_nonhab = total / (2.0 * count_nonhab)
+    weight_hab = total / (2.0 * count_hab)
+    
+    # Create tensor for PyTorch CrossEntropyLoss
+    class_weights = torch.tensor([weight_nonhab, weight_hab], dtype=torch.float32)
+    
+    print("\n--- Training Set Imbalance Calculated ---")
+    print(f"Non-HAB Samples (Class 0): {count_nonhab} -> Weight: {weight_nonhab:.3f}")
+    print(f"HAB Samples (Class 1):     {count_hab} -> Weight: {weight_hab:.3f}")
+    
+    return df, class_weights
+
+# ==============================================================================
 # MODULE 3: UNIVERSAL PYTORCH DATASET
 # ==============================================================================
 
@@ -541,6 +576,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 64
     NUM_WORKERS = 8
     
+    '''
     # Run Module 1
     harmonizer = DatasetHarmonizer(IW_DIR, OW_DIR, IW_EXCEL, OW_CSV)
     master_dataframe = harmonizer.create_master_registry()
@@ -548,7 +584,7 @@ if __name__ == "__main__":
     # Run Module 2
     split_df, class_weights = create_stratified_split_and_weights(master_dataframe, MASTER_OUTPUT)
     
-    # Define our experimental runs
+     Define our experimental runs
     EXPERIMENTS = [
         {
             'exp_name': 'generic_resnet18',
@@ -579,7 +615,21 @@ if __name__ == "__main__":
             'weights_path': '/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors'
         }
     ]
-
+    '''
+    
+    # Run load laready split dataste and extract weights 
+    split_df, class_weights = load_existing_split_and_get_weights(MASTER_OUTPUT)
+    
+    EXPERIMENTS = [
+        {
+            'exp_name': 'generic_resnet34_10bands',
+            'architecture': 'resnet34',
+            'num_bands': 10,          # Configured strictly for 10 bands!
+            'mode': 'generic',        # Inflates ImageNet weights to 10 bands
+            'weights_path': None
+        }
+    ]
+    
     # --- MAIN LOOP ---
     for exp in EXPERIMENTS:
         print("\n" + "="*60)
