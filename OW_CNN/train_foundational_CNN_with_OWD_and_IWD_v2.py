@@ -285,7 +285,7 @@ class UniversalWaterDataset(torch.utils.data.Dataset):
 # MODULE 4: MULTI-MODEL BUILDER
 # ==============================================================================
 
-def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weights_path=None):
+def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weights_path=None, custom_weights_path=None):
     """
     Constructs the requested ResNet architecture, alters the input channels,
     loads the appropriate pre-trained weights safely, and alters the output head.
@@ -344,7 +344,7 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
 
     elif mode == 'bigearthnet':
         if num_bands != 10:
-            raise ValueError("BigEarthNet pre-trained weights strictly require exactly 10 bands. Change num_bands to 10.")
+            raise ValueError("BigEarthNet strictly requires 10 bands.")
             
         print(f"[{architecture.upper()}] Mode: BigEarthNet - Loading 10-band weights...")
         if weights_path.endswith('.safetensors'):
@@ -352,8 +352,10 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
         else:
             state_dict = torch.load(weights_path, map_location='cpu')
             
-        if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
-        elif 'model_state_dict' in state_dict: state_dict = state_dict['model_state_dict']
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        elif 'model_state_dict' in state_dict:
+            state_dict = state_dict['model_state_dict']
         
         new_state_dict = {}
         for k, v in state_dict.items():
@@ -361,13 +363,59 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
             if 'fc.' in name: continue
             new_state_dict[name] = v
             
-        missing, unexpected = model.load_state_dict(new_state_dict, strict=False)
-        if 'conv1.weight' in missing:
-            print("WARNING: conv1.weight failed to load!")
-        else:
-            print("-> BigEarthNet weights mapped successfully.")
+        model.load_state_dict(new_state_dict, strict=False)
 
-    # 4. Head Surgery (Change to Binary Classification)
+    elif mode == 'frank_custom_r34':
+        if architecture != 'resnet34' or num_bands != 10:
+            raise ValueError("Frankenstein requires 'resnet34' and 10 bands.")
+        if not custom_weights_path:
+            raise ValueError("You must provide custom_weights_path for the trained R34 base.")
+            
+        print(f"[{architecture.upper()}] Mode: Frankenstein - Grafting BigEarthNet onto Custom Trained R34...")
+        
+        # A. Configure Head for 2 classes immediately
+        num_ftrs = model.fc.in_features
+        model.fc = nn.Linear(num_ftrs, 2)
+        
+        # B. Load Your Custom Trained R34 Weights (10 bands)
+        custom_ckpt = torch.load(custom_weights_path, map_location='cpu')
+        if 'state_dict' in custom_ckpt:
+            custom_dict = {k.replace('model.', ''): v for k, v in custom_ckpt['state_dict'].items()}
+        else:
+            custom_dict = custom_ckpt
+            
+        model.load_state_dict(custom_dict)
+        print("-> Step 1: Loaded Custom R34 Base Weights.")
+        
+        # C. Load BigEarthNet R18 weights
+        if weights_path.endswith('.safetensors'): state_dict = load_file(weights_path)
+        else: state_dict = torch.load(weights_path, map_location='cpu')
+            
+        if 'state_dict' in state_dict: state_dict = state_dict['state_dict']
+        elif 'model_state_dict' in state_dict: state_dict = state_dict['model_state_dict']
+        
+        bigearth_dict = {}
+        for k, v in state_dict.items():
+            name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '')
+            if 'fc.' in name: continue
+            bigearth_dict[name] = v
+
+        # D. SURGERY: Overwrite matching layers
+        r34_dict = model.state_dict()
+        overwritten_count = 0
+        
+        for name, r18_weight in bigearth_dict.items():
+            if name in r34_dict and r34_dict[name].shape == r18_weight.shape:
+                r34_dict[name] = r18_weight
+                overwritten_count += 1
+                
+        model.load_state_dict(r34_dict)
+        print(f"-> Step 2: Overwrote {overwritten_count} early layers with BigEarthNet weights.")
+        
+        # Return early because we already did the Head Surgery in Step A!
+        return model
+
+    # 4. Standard Head Surgery (Change to Binary Classification for non-Frankenstein models)
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 2)
     
@@ -378,7 +426,7 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
 # ==============================================================================
 
 class HABLightningSystem(L.LightningModule):
-    def __init__(self, architecture, num_bands, mode, weights_path, lr, class_weights):
+    def __init__(self, architecture, num_bands, mode, weights_path, lr, class_weights, custom_weights_path=None):
         super().__init__()
         self.save_hyperparameters(ignore=['class_weights'])
         
@@ -387,7 +435,8 @@ class HABLightningSystem(L.LightningModule):
             architecture=architecture, 
             num_bands=num_bands, 
             mode=mode, 
-            weights_path=weights_path
+            weights_path=weights_path,
+            custom_weights_path=custom_weights_path
         )
         
         # 2. Loss Function (Weighted)
@@ -616,7 +665,7 @@ if __name__ == "__main__":
         }
     ]
     '''
-    
+    '''
     # Run load laready split dataste and extract weights 
     split_df, class_weights = load_existing_split_and_get_weights(MASTER_OUTPUT)
     
@@ -629,6 +678,21 @@ if __name__ == "__main__":
             'weights_path': None
         }
     ]
+    '''
+    # Run load laready split dataste and extract weights 
+    split_df, class_weights = load_existing_split_and_get_weights(MASTER_OUTPUT)
+    
+    EXPERIMENTS = [
+        {
+            'exp_name': 'frank_custom_resnet34',
+            'architecture': 'resnet34',
+            'num_bands': 10,
+            'mode': 'frank_custom_r34',
+            'weights_path': '/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors',
+            'custom_weights_path': '/home/kostas/AMFITRITE/IW_and_OW_CNN/generic_resnet34_10bands/logs/version_0/checkpoints/best-hab-epoch=31-val_f1_macro=0.866.ckpt' 
+        }
+    ]
+    
     
     # --- MAIN LOOP ---
     for exp in EXPERIMENTS:
@@ -655,7 +719,8 @@ if __name__ == "__main__":
             mode=exp['mode'],
             weights_path=exp['weights_path'],
             lr=1e-4,
-            class_weights=class_weights
+            class_weights=class_weights,
+            custom_weights_path=exp.get('custom_weights_path', None)
         )
 
         # 3. Callbacks & Logger
