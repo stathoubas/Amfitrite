@@ -5,6 +5,8 @@ Created on Fri May  8 12:05:28 2026
 @author: K. Pikounis
 
 train CNNs using both OW and IW datasest
+fankenstein network resnet34: trained resnet 18 started from bigearth weights + trained resnet 34 from imagenet weightes 
+
 """
 import os
 import pandas as pd
@@ -397,7 +399,7 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
         
         bigearth_dict = {}
         for k, v in state_dict.items():
-            name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '')
+            name = k.replace('module.', '').replace('backbone.', '').replace('model.vision_encoder.', '').replace('model.', '')
             if 'fc.' in name: continue
             bigearth_dict[name] = v
 
@@ -685,11 +687,11 @@ if __name__ == "__main__":
     
     EXPERIMENTS = [
         {
-            'exp_name': 'frank_custom_resnet34',
+            'exp_name': 'frank_v2_custom_resnet34',
             'architecture': 'resnet34',
             'num_bands': 10,
             'mode': 'frank_custom_r34',
-            'weights_path': '/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors',
+            'weights_path': '/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/logs/version_0/checkpoints/best-hab-epoch=52-val_f1_macro=0.882.ckpt',
             'custom_weights_path': '/home/kostas/AMFITRITE/IW_and_OW_CNN/generic_resnet34_10bands/logs/version_0/checkpoints/best-hab-epoch=31-val_f1_macro=0.866.ckpt' 
         }
     ]
