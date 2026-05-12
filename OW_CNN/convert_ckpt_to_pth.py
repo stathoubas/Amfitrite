@@ -60,9 +60,9 @@ def convert_ckpt_to_raw_pth(ckpt_path, output_pth_path):
 # ==============================================================================
 if __name__ == "__main__":
     # Point this to your best AMFITRITE checkpoint
-    INPUT_CKPT = "/home/kostas/AMFITRITE/IW_and_OW_CNN/frank_custom_resnet34/logs/version_0/checkpoints/best-hab-epoch=43-val_f1_macro=0.892.ckpt"
+    INPUT_CKPT = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/logs/version_0/checkpoints/best-hab-epoch=52-val_f1_macro=0.882.ckpt"
     
     # Define where you want the clean file saved
-    OUTPUT_PTH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/frank_custom_resnet34/amfitrite_collage_resnet34_best.pth"
+    OUTPUT_PTH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth"
     
     convert_ckpt_to_raw_pth(INPUT_CKPT, OUTPUT_PTH)
