@@ -105,19 +105,17 @@ def create_probability_distribution_plot(pth_path, csv_path, output_plot_path, a
     # 1. Plotting Configuration
     splits = ['training', 'validation', 'test']
     
-    # Defining visual styles per your request
+    # Visual Styles: Training is a filled background, Val/Test are bold outlines
     styles = {
-        'training':   {'c0': 'orange', 'c1': 'green', 'ls': '-',  'marker': '',  'lw': 2.0},
-        'validation': {'c0': 'maroon', 'c1': 'cyan',  'ls': '-',  'marker': '*', 'lw': 1.0, 'ms': 6},
-        'test':       {'c0': 'red',    'c1': 'blue',  'ls': '--', 'marker': '',  'lw': 2.0}
+        'training':   {'c0': 'orange', 'c1': 'green', 'ls': '-',  'lw': 1.5, 'fill': True,  'alpha': 0.25},
+        'validation': {'c0': 'maroon', 'c1': 'cyan',  'ls': '-',  'lw': 2.5, 'fill': False, 'alpha': 0.9},
+        'test':       {'c0': 'red',    'c1': 'blue',  'ls': '--', 'lw': 2.5, 'fill': False, 'alpha': 0.9}
     }
     
     fig, ax = plt.subplots(figsize=(12, 7))
     fig.suptitle(f"HAB Prediction Confidence Distribution ({architecture.upper()} | {num_bands} Bands)", fontsize=16, fontweight='bold')
     
-    # Create 50 mathematical bins from 0.0 to 1.0
-    bins = np.linspace(0, 1, 51)
-    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+    bins = np.linspace(0, 1, 50)
     
     # 2. Data Processing & Plotting
     for split in splits:
@@ -130,43 +128,35 @@ def create_probability_distribution_plot(pth_path, csv_path, output_plot_path, a
         p0 = probs[labels == 0]
         p1 = probs[labels == 1]
         
-        # Calculate histogram densities (Density=True normalizes sizes so Train, Val, and Test overlay perfectly)
-        h0, _ = np.histogram(p0, bins=bins, density=True)
-        h1, _ = np.histogram(p1, bins=bins, density=True)
-        
-        # Replace absolute 0 with NaN so the log scale doesn't crash or draw ugly lines to the floor
-        h0 = np.where(h0 == 0, np.nan, h0)
-        h1 = np.where(h1 == 0, np.nan, h1)
-        
         s = styles[split]
-        ms = s.get('ms', 0) # Default marker size to 0 if not specified
+        htype = 'stepfilled' if s['fill'] else 'step'
         
         # Plot Non-HAB (Class 0)
-        ax.plot(bin_centers, h0, color=s['c0'], linestyle=s['ls'], marker=s['marker'], 
-                linewidth=s['lw'], markersize=ms, alpha=0.8, 
+        ax.hist(p0, bins=bins, density=True, histtype=htype, 
+                color=s['c0'], linestyle=s['ls'], linewidth=s['lw'], alpha=s['alpha'], 
                 label=f"{split.capitalize()} (Non-HAB Actual)")
         
         # Plot HAB (Class 1)
-        ax.plot(bin_centers, h1, color=s['c1'], linestyle=s['ls'], marker=s['marker'], 
-                linewidth=s['lw'], markersize=ms, alpha=0.8, 
+        ax.hist(p1, bins=bins, density=True, histtype=htype, 
+                color=s['c1'], linestyle=s['ls'], linewidth=s['lw'], alpha=s['alpha'], 
                 label=f"{split.capitalize()} (HAB Actual)")
 
     # 3. Formatting the Output
-    ax.set_yscale('log') # Logarithmic Y-Axis!
+    ax.set_yscale('log') # Logarithmic Y-Axis
     ax.set_xlim(-0.02, 1.02)
     ax.set_xlabel("Predicted Probability of being a HAB", fontsize=12)
     ax.set_ylabel("Density (Log Scale)", fontsize=12)
     
     # The Decision Boundary
-    ax.axvline(0.5, color='black', linestyle=':', linewidth=2, alpha=0.7, label="Decision Boundary (0.5)")
+    ax.axvline(0.5, color='black', linestyle=':', linewidth=2, alpha=0.8, label="Decision Boundary (0.5)")
     
-    # Clean up the legend (move it outside the plot so it doesn't cover data)
+    # Clean up the legend
     ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0., fontsize=10)
     ax.grid(True, which='both', linestyle='--', alpha=0.4)
 
     plt.tight_layout()
     plt.savefig(output_plot_path, dpi=300, bbox_inches='tight')
-    print(f"\n[Success] Log-scale Overlay Plot saved to {output_plot_path}")
+    print(f"\n[Success] Clean Binned Histogram saved to {output_plot_path}")
 
 if __name__ == "__main__":
     
