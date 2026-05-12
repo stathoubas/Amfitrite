@@ -380,11 +380,12 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
         # B. Load Your Custom Trained R34 Weights (10 bands)
         custom_ckpt = torch.load(custom_weights_path, map_location='cpu')
         if 'state_dict' in custom_ckpt:
-            custom_dict = {k.replace('model.', ''): v for k, v in custom_ckpt['state_dict'].items()}
+            # ONLY extract keys that actually belong to the ResNet (ignoring class_weights, etc.)
+            custom_dict = {k.replace('model.', ''): v for k, v in custom_ckpt['state_dict'].items() if k.startswith('model.')}
         else:
             custom_dict = custom_ckpt
             
-        model.load_state_dict(custom_dict)
+        model.load_state_dict(custom_dict, strict=False)
         print("-> Step 1: Loaded Custom R34 Base Weights.")
         
         # C. Load BigEarthNet R18 weights
