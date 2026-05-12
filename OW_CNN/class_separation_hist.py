@@ -141,9 +141,9 @@ def create_probability_distribution_plot(pth_path, csv_path, output_plot_path, a
 
 if __name__ == "__main__":
     
-    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_resnet18_bigearth_best.pth"
+    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth"
     csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
-    plot_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/class_separation.png"
+    plot_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/class_separation.png"
     architecture = "resnet18"
     bands = 10
     
