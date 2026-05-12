@@ -4,7 +4,6 @@ Created on Tue May 12 14:40:48 2026
 
 @author: K. Pikounis
 """
-
 import os
 import argparse
 import torch
@@ -14,7 +13,6 @@ import pandas as pd
 import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 # ==============================================================================
 # 1. DYNAMIC DATASET & MODEL BUILDER
@@ -65,10 +63,7 @@ def load_resnet_model(pth_path, architecture, num_bands, device):
     else:
         raise ValueError("Architecture must be 'resnet18' or 'resnet34'")
         
-    # Adjust Stem
     model.conv1 = nn.Conv2d(num_bands, 64, kernel_size=7, stride=2, padding=3, bias=False)
-    
-    # Adjust Head
     num_ftrs = model.fc.in_features
     model.fc = nn.Linear(num_ftrs, 2)
     
@@ -78,7 +73,7 @@ def load_resnet_model(pth_path, architecture, num_bands, device):
     return model
 
 # ==============================================================================
-# 2. INFERENCE & PLOTTING ENGINE
+# 2. INFERENCE & OVERLAY PLOTTING ENGINE
 # ==============================================================================
 
 def get_probabilities(model, loader, device):
@@ -107,37 +102,71 @@ def create_probability_distribution_plot(pth_path, csv_path, output_plot_path, a
     print(f"Loading dataset split from {csv_path}...")
     df = pd.read_csv(csv_path)
     
+    # 1. Plotting Configuration
     splits = ['training', 'validation', 'test']
-    titles = ['Training Set', 'Validation Set', 'Test Set']
     
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+    # Defining visual styles per your request
+    styles = {
+        'training':   {'c0': 'orange', 'c1': 'green', 'ls': '-',  'marker': '',  'lw': 2.0},
+        'validation': {'c0': 'maroon', 'c1': 'cyan',  'ls': '-',  'marker': '*', 'lw': 1.0, 'ms': 6},
+        'test':       {'c0': 'red',    'c1': 'blue',  'ls': '--', 'marker': '',  'lw': 2.0}
+    }
+    
+    fig, ax = plt.subplots(figsize=(12, 7))
     fig.suptitle(f"HAB Prediction Confidence Distribution ({architecture.upper()} | {num_bands} Bands)", fontsize=16, fontweight='bold')
     
-    for i, (split, title) in enumerate(zip(splits, titles)):
+    # Create 50 mathematical bins from 0.0 to 1.0
+    bins = np.linspace(0, 1, 51)
+    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+    
+    # 2. Data Processing & Plotting
+    for split in splits:
         print(f" -> Processing {split} split...")
         ds = InferenceDataset(df, split_name=split, num_bands=num_bands)
         loader = torch.utils.data.DataLoader(ds, batch_size=64, shuffle=False, num_workers=8)
         
         probs, labels = get_probabilities(model, loader, device)
         
-        ax = axes[i]
-        sns.histplot(probs[labels == 0], bins=50, color='red', alpha=0.6, label='Non-HAB', ax=ax, stat='density', edgecolor=None)
-        sns.histplot(probs[labels == 1], bins=50, color='blue', alpha=0.6, label='HAB', ax=ax, stat='density', edgecolor=None)
+        p0 = probs[labels == 0]
+        p1 = probs[labels == 1]
         
-        ax.set_title(title, fontsize=14)
-        ax.set_xlim(0, 1)
-        ax.set_xlabel("Predicted Probability of being a HAB", fontsize=12)
-        if i == 0: ax.set_ylabel("Density", fontsize=12)
-        else: ax.set_ylabel("")
-            
-        ax.axvline(0.5, color='black', linestyle='--', linewidth=1, alpha=0.5)
-        ax.legend(loc='upper center')
-        ax.grid(True, linestyle=':', alpha=0.7)
+        # Calculate histogram densities (Density=True normalizes sizes so Train, Val, and Test overlay perfectly)
+        h0, _ = np.histogram(p0, bins=bins, density=True)
+        h1, _ = np.histogram(p1, bins=bins, density=True)
+        
+        # Replace absolute 0 with NaN so the log scale doesn't crash or draw ugly lines to the floor
+        h0 = np.where(h0 == 0, np.nan, h0)
+        h1 = np.where(h1 == 0, np.nan, h1)
+        
+        s = styles[split]
+        ms = s.get('ms', 0) # Default marker size to 0 if not specified
+        
+        # Plot Non-HAB (Class 0)
+        ax.plot(bin_centers, h0, color=s['c0'], linestyle=s['ls'], marker=s['marker'], 
+                linewidth=s['lw'], markersize=ms, alpha=0.8, 
+                label=f"{split.capitalize()} (Non-HAB Actual)")
+        
+        # Plot HAB (Class 1)
+        ax.plot(bin_centers, h1, color=s['c1'], linestyle=s['ls'], marker=s['marker'], 
+                linewidth=s['lw'], markersize=ms, alpha=0.8, 
+                label=f"{split.capitalize()} (HAB Actual)")
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.savefig(output_plot_path, dpi=300)
-    print(f"\n[Success] Plot saved to {output_plot_path}")
+    # 3. Formatting the Output
+    ax.set_yscale('log') # Logarithmic Y-Axis!
+    ax.set_xlim(-0.02, 1.02)
+    ax.set_xlabel("Predicted Probability of being a HAB", fontsize=12)
+    ax.set_ylabel("Density (Log Scale)", fontsize=12)
+    
+    # The Decision Boundary
+    ax.axvline(0.5, color='black', linestyle=':', linewidth=2, alpha=0.7, label="Decision Boundary (0.5)")
+    
+    # Clean up the legend (move it outside the plot so it doesn't cover data)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0., fontsize=10)
+    ax.grid(True, which='both', linestyle='--', alpha=0.4)
 
+    plt.tight_layout()
+    plt.savefig(output_plot_path, dpi=300, bbox_inches='tight')
+    print(f"\n[Success] Log-scale Overlay Plot saved to {output_plot_path}")
 
 if __name__ == "__main__":
     
