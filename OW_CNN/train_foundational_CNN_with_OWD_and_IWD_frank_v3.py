@@ -312,7 +312,6 @@ class FrankFinetuningCallback(BaseFinetuning):
             self.unfreeze_and_add_param_group(
                 modules=pl_module.model,
                 optimizer=optimizer,
-                trainable=True,
                 initial_denom_lr=10.0 # Divides the current learning rate by 10
             )
 
