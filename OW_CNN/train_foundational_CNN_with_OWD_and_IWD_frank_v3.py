@@ -559,7 +559,8 @@ class HABLightningSystem(L.LightningModule):
         self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        active_parameters = filter(lambda p: p.requires_grad, self.parameters())        
+        optimizer = torch.optim.AdamW(active_parameters, lr=self.hparams.lr)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='max', factor=0.1, patience=5
         )
@@ -567,8 +568,6 @@ class HABLightningSystem(L.LightningModule):
             "optimizer": optimizer, 
             "lr_scheduler": {"scheduler": scheduler, "monitor": "val_f1_macro"}
         }
-
-
 
 # ==============================================================================
 # MODULE 6: PLOTTING
@@ -715,7 +714,7 @@ if __name__ == "__main__":
     
     EXPERIMENTS = [
         {
-            'exp_name': 'frank_v3_custom_resnet34_freeze_34_layers_first',
+            'exp_name': 'frank_v3_custom_resnet34_freeze_34_layers_first_try2',
             'architecture': 'resnet34',
             'num_bands': 10,
             'mode': 'frank_custom_r34',
