@@ -314,7 +314,8 @@ class FrankFinetuningCallback(BaseFinetuning):
         self.make_trainable(pl_module.model.layer4[2])
         
         self.make_trainable(pl_module.model.fc)
-
+    
+    '''
     def finetune_function(self, pl_module, current_epoch, optimizer):
         # When we hit the target epoch, THAW everything and drop the learning rate!
         if current_epoch == self.unfreeze_at_epoch:
@@ -324,6 +325,23 @@ class FrankFinetuningCallback(BaseFinetuning):
                 optimizer=optimizer,
                 initial_denom_lr=10.0 # Divides the current learning rate by 10
             )
+    '''
+    def finetune_function(self, pl_module, current_epoch, optimizer):
+        # When we hit the target epoch, THAW everything and drop ALL learning rates!
+        if current_epoch == self.unfreeze_at_epoch:
+            print(f"\n[Epoch {current_epoch}] Thawing BigEarthNet. Crushing LR for the ENTIRE network!")
+            
+            # 1. Unfreeze the BigEarthNet layers and add them to the optimizer
+            self.unfreeze_and_add_param_group(
+                modules=pl_module.model,
+                optimizer=optimizer,
+                initial_denom_lr=1.0 # Keep at 1.0 temporarily so it matches the current ImageNet LR
+            )
+            
+            # 2. SURGICAL OVERRIDE: Forcefully divide the learning rate of EVERY 
+            # parameter group (both ImageNet AND BigEarthNet) by 10.
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = param_group['lr'] / 10.0
 
 def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weights_path=None, custom_weights_path=None):
     """
@@ -724,7 +742,7 @@ if __name__ == "__main__":
     
     EXPERIMENTS = [
         {
-            'exp_name': 'frank_v3_custom_resnet34_freeze_34_layers_first',
+            'exp_name': 'frank_v3_custom_resnet34_freeze_34_layers_first_v2',
             'architecture': 'resnet34',
             'num_bands': 10,
             'mode': 'frank_custom_r34',
