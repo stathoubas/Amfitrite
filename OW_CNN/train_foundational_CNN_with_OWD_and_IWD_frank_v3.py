@@ -299,10 +299,20 @@ class FrankFinetuningCallback(BaseFinetuning):
         # Freeze the entire network initially...
         self.freeze(pl_module.model)
         
-        # ...Then UNFREEZE ONLY the deeper layers (Layer 3, Layer 4, and the Head)
-        # This forces the R34 body to adapt to the frozen R18 stem!
-        self.make_trainable(pl_module.model.layer3)
-        self.make_trainable(pl_module.model.layer4)
+        # 2. SURGICALLY UNFREEZE ONLY THE IMAGENET BLOCKS
+        # Layer 1: Unfreeze Block 2
+        self.make_trainable(pl_module.model.layer1[2])
+        # Layer 2: Unfreeze Blocks 2 and 3
+        self.make_trainable(pl_module.model.layer2[2])
+        self.make_trainable(pl_module.model.layer2[3])
+        # Layer 3: Unfreeze Blocks 2, 3, 4, and 5
+        self.make_trainable(pl_module.model.layer3[2])
+        self.make_trainable(pl_module.model.layer3[3])
+        self.make_trainable(pl_module.model.layer3[4])
+        self.make_trainable(pl_module.model.layer3[5])
+        # Layer 4: Unfreeze Block 2
+        self.make_trainable(pl_module.model.layer4[2])
+        
         self.make_trainable(pl_module.model.fc)
 
     def finetune_function(self, pl_module, current_epoch, optimizer):
@@ -714,7 +724,7 @@ if __name__ == "__main__":
     
     EXPERIMENTS = [
         {
-            'exp_name': 'frank_v3_custom_resnet34_freeze_34_layers_first_try2',
+            'exp_name': 'frank_v3_custom_resnet34_freeze_34_layers_first',
             'architecture': 'resnet34',
             'num_bands': 10,
             'mode': 'frank_custom_r34',
