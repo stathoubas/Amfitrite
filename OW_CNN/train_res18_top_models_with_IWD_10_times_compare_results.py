@@ -1,18 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu May 14 17:45:29 2026
-
-@author: K. Pikounis
-"""
-
-# -*- coding: utf-8 -*-
-"""
-Domain-Specific Fine-Tuning: Inland Water (Augmented with Land/Clouds)
+The "Gold Standard" Domain-Specific Fine-Tuning Pipeline
+Target: Inland Water (Augmented with Land/Clouds)
 
 Runs 10 Monte Carlo Iterations evaluating 3 ResNet-18 variants:
-1. Baseline (BigEarthNet Weights -> Trained on IW)
-2. Zero-Shot (Universal Foundation Model -> Evaluated on IW)
-3. Fine-Tuned (Universal Foundation Model -> Trained on IW)
+1. Baseline: BigEarthNet -> Trained on IW
+2. Zero-Shot: BigEarthNet -> Trained on Master (Universal) -> Evaluated on IW
+3. Fine-Tuned: Universal Foundation -> Fine-Tuned on IW
 """
 import os
 import pandas as pd
@@ -110,8 +104,9 @@ class DatasetHarmonizer:
 # MODULE 2: SPLITTER & IMBALANCE CALCULATOR
 # ==============================================================================
 
-def create_stratified_split_and_weights(master_df, output_registry_path, random_seed=42):
-    print("\nPerforming 70/15/15 Stratified Split on Augmented Dataset...")
+def create_stratified_split(master_df, output_registry_path, random_seed=42):
+    """Splits the Master dataframe and returns it. Weights are calculated separately later."""
+    print("\nPerforming 70/15/15 Stratified Split on Master Dataset...")
     df = master_df.copy()
     df['split'] = 'junk'
     
@@ -126,18 +121,20 @@ def create_stratified_split_and_weights(master_df, output_registry_path, random_
     df.loc[val_idx, 'split'] = 'validation'
     df.loc[test_idx, 'split'] = 'test'
     df.to_csv(output_registry_path, index=False)
+    
+    return df
 
-    # Class Weights based ONLY on Training set
+def calculate_class_weights(df):
+    """Calculates PyTorch class weights strictly from the Training set of the given dataframe."""
     train_df = df[df['split'] == 'training']
     count_nonhab = len(train_df[train_df['binary_label'] == 0])
     count_hab = len(train_df[train_df['binary_label'] == 1])
     total = count_nonhab + count_hab
     
-    weight_nonhab = total / (2.0 * count_nonhab)
-    weight_hab = total / (2.0 * count_hab)
-    class_weights = torch.tensor([weight_nonhab, weight_hab], dtype=torch.float32)
+    weight_nonhab = total / (2.0 * count_nonhab) if count_nonhab > 0 else 1.0
+    weight_hab = total / (2.0 * count_hab) if count_hab > 0 else 1.0
     
-    return df, class_weights
+    return torch.tensor([weight_nonhab, weight_hab], dtype=torch.float32)
 
 # ==============================================================================
 # MODULE 3: UNIVERSAL PYTORCH DATASET
@@ -150,13 +147,12 @@ class UniversalWaterDataset(torch.utils.data.Dataset):
         self.num_bands = num_bands
         
         self.active_bands = [
-                           "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", 
+            "B02_raw.tif", "B03_raw.tif", "B04_raw.tif", 
             "B05_raw.tif", "B06_raw.tif", "B07_raw.tif", "B08_raw.tif", 
             "B8A_raw.tif",                "B11_raw.tif", "B12_raw.tif"
         ]
 
-    def __len__(self):
-        return len(self.df)
+    def __len__(self): return len(self.df)
 
     def apply_augmentations(self, tensor):
         if random.random() > 0.5: tensor = TF.hflip(tensor)
@@ -177,9 +173,7 @@ class UniversalWaterDataset(torch.utils.data.Dataset):
                 band_data.append(src.read(1).astype(np.float32))
         
         tensor = torch.from_numpy(np.stack(band_data, axis=0)) / 10000.0
-        
-        if self.mode == 'training':
-            tensor = self.apply_augmentations(tensor)
+        if self.mode == 'training': tensor = self.apply_augmentations(tensor)
             
         return tensor, label, strat_group
 
@@ -189,8 +183,7 @@ class UniversalWaterDataset(torch.utils.data.Dataset):
 # ==============================================================================
 
 def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weights_path=None):
-    if architecture != 'resnet18':
-        raise ValueError("This script is strictly constrained to ResNet-18 duels.")
+    if architecture != 'resnet18': raise ValueError("This script is constrained to ResNet-18 duels.")
 
     model = models.resnet18(weights=None)
     model.conv1 = nn.Conv2d(num_bands, 64, kernel_size=7, stride=2, padding=3, bias=False)
@@ -208,28 +201,22 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
             for k, v in state_dict.items() if not 'fc.' in k
         }
         model.load_state_dict(new_state_dict, strict=False)
-        
-        # Modify Head for Binary Classification
         model.fc = nn.Linear(model.fc.in_features, 2)
 
     elif mode == 'custom_r18':
-        print("[RESNET18] Mode: Universal Foundation - Loading custom weights...")
-        
-        # Alter the head FIRST so the shape matches the incoming checkpoint (2 classes)
+        print(f"[RESNET18] Mode: Universal Foundation - Loading weights from {weights_path}...")
         model.fc = nn.Linear(model.fc.in_features, 2)
         
         ckpt = torch.load(weights_path, map_location='cpu')
         state_dict = ckpt['state_dict'] if 'state_dict' in ckpt else ckpt
         
-        # Robust dictionary mapping: Handles both raw .pth and lightning-prefixed dictionaries
         clean_dict = {}
         for k, v in state_dict.items():
-            # If the prefix 'model.' exists, strip it. Otherwise, keep the key as is.
             clean_key = k.replace('model.', '') if k.startswith('model.') else k
             clean_dict[clean_key] = v
             
         model.load_state_dict(clean_dict, strict=True)
-        print("-> Universal Foundation Weights mapped successfully.")
+        print("-> Foundation Weights mapped successfully.")
 
     return model
 
@@ -243,7 +230,6 @@ class HABLightningSystem(L.LightningModule):
         self.save_hyperparameters(ignore=['class_weights'])
         
         self.model = build_water_cnn(architecture, num_bands, mode, weights_path)
-        
         self.register_buffer("class_weights", class_weights)
         self.criterion = torch.nn.CrossEntropyLoss(weight=self.class_weights)
         
@@ -254,7 +240,7 @@ class HABLightningSystem(L.LightningModule):
         self.train_bal_acc = MulticlassAccuracy(num_classes=2, average='macro')
         self.val_bal_acc = MulticlassAccuracy(num_classes=2, average='macro')
         
-        # Array to store outputs for granular epoch-end calculation
+        # Storage for highly granular metrics per epoch
         self.validation_step_outputs = []
 
     def forward(self, x): return self.model(x)
@@ -271,7 +257,7 @@ class HABLightningSystem(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y, strat_groups = batch # Unpack strat_groups here
+        x, y, strat_groups = batch
         logits = self(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -280,56 +266,36 @@ class HABLightningSystem(L.LightningModule):
         self.log("val_loss", loss, on_epoch=True)
         self.log("val_f1_macro", self.val_f1, on_epoch=True, prog_bar=True)
         
-        # Save batch predictions for epoch-end calculations
         self.validation_step_outputs.append({
-            'preds': preds.cpu(),
-            'targets': y.cpu(),
-            'groups': strat_groups
+            'preds': preds.cpu(), 'targets': y.cpu(), 'groups': strat_groups
         })
         return loss
 
     def on_validation_epoch_end(self):
-        # 1. Log overall standard metrics
         self.log("val_acc_overall", self.val_acc.compute())
         self.log("val_bal_acc", self.val_bal_acc.compute()) 
         
-        # 2. Extract all batches into single arrays
-        if len(self.validation_step_outputs) == 0:
-            return
+        if len(self.validation_step_outputs) == 0: return
             
         all_preds = torch.cat([x['preds'] for x in self.validation_step_outputs])
         all_targets = torch.cat([x['targets'] for x in self.validation_step_outputs])
         all_groups = [g for x in self.validation_step_outputs for g in x['groups']]
         
-        # 3. Calculate Global Class Accuracies (HAB vs non-HAB)
-        hab_indices = (all_targets == 1)
-        nonhab_indices = (all_targets == 0)
-        
-        if hab_indices.any():
-            hab_acc = (all_preds[hab_indices] == all_targets[hab_indices]).float().mean()
-            self.log("val_hab_acc", hab_acc)
-            
-        if nonhab_indices.any():
-            nonhab_acc = (all_preds[nonhab_indices] == all_targets[nonhab_indices]).float().mean()
-            self.log("val_nonhab_acc", nonhab_acc)
+        # Calculate Global Class Accuracies
+        if (all_targets == 1).any():
+            self.log("val_hab_acc", (all_preds[all_targets == 1] == all_targets[all_targets == 1]).float().mean())
+        if (all_targets == 0).any():
+            self.log("val_nonhab_acc", (all_preds[all_targets == 0] == all_targets[all_targets == 0]).float().mean())
 
-        # 4. Calculate Sub-Domain Accuracies (Land, Clouds, etc.)
-        unique_groups = ['iw_hab', 'iw_nonhab', 'ow_hab', 'ow_nonhab', 'land', 'clouds']
-        
-        for group in unique_groups:
+        # Calculate Sub-Domain Accuracies
+        for group in ['iw_hab', 'iw_nonhab', 'ow_hab', 'ow_nonhab', 'land', 'clouds']:
             indices = [i for i, g in enumerate(all_groups) if g == group]
             if len(indices) > 0:
-                group_preds = all_preds[indices]
-                group_targets = all_targets[indices]
-                acc = (group_preds == group_targets).float().mean()
-                self.log(f"val_{group}_acc", acc)
+                self.log(f"val_{group}_acc", (all_preds[indices] == all_targets[indices]).float().mean())
             else:
-                self.log(f"val_{group}_acc", 0.0) # Prevents crashing if a split has 0 images of a class
+                self.log(f"val_{group}_acc", 0.0) 
 
-        # 5. Reset for the next epoch
-        self.val_f1.reset()
-        self.val_acc.reset()
-        self.val_bal_acc.reset()
+        self.val_f1.reset(); self.val_acc.reset(); self.val_bal_acc.reset()
         self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
@@ -345,7 +311,6 @@ def plot_paired_scatter(csv_path, output_dir):
     """Generates individual, high-res academic scatter plots comparing Baseline vs Fine-Tuned."""
     df = pd.read_csv(csv_path)
     
-    # We compare Baseline BigEarth (baseline_) vs Fine-Tuned Foundation (ftfound_)
     metrics = [
         ('baseline_f1', 'ftfound_f1', 'F1 Score (Macro)', 'f1_score'),
         ('baseline_acc', 'ftfound_acc', 'Overall Accuracy', 'accuracy_overall'),
@@ -438,26 +403,15 @@ if __name__ == "__main__":
     NUM_WORKERS = 8
     TOTAL_ITERATIONS = 10
     
-    # 1. Provide exact paths to your pre-trained files here:
     BIGEARTH_WEIGHTS = '/home/kostas/AMFITRITE/pretrained_model_weights/BIFOLD-BigEarthNetv2-0_resnet18-s2-v0.2.0/model.safetensors'
-    UNIVERSAL_FOUNDATION_WEIGHTS = '/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth' 
     
-    # 2. Harmonize & Filter for Augmented IW Dataset
+    # Harmonize Once
     harmonizer = DatasetHarmonizer(IW_DIR, OW_DIR, IW_EXCEL, OW_CSV)
     master_dataframe = harmonizer.create_master_registry()
-    
-    print("\n[Data Engineering] Filtering strictly for IW images + OW Clouds + OW Land...")
-    iw_augmented_df = master_dataframe[
-        (master_dataframe['source'] == 'IW') | 
-        (master_dataframe['strat_group'].isin(['clouds', 'land']))
-    ].reset_index(drop=True)
-    
-    print(f"Augmented IW Dataset Size: {len(iw_augmented_df)} total images.")
-    
     master_results = []
 
     # ==========================================================================
-    # THE 10-ITERATION MONTE CARLO LOOP
+    # THE LEAK-FREE 10-ITERATION NESTED MONTE CARLO LOOP
     # ==========================================================================
     for iteration in range(1, TOTAL_ITERATIONS + 1):
         print("\n" + "X"*60)
@@ -468,86 +422,109 @@ if __name__ == "__main__":
         iter_dir = os.path.join(BASE_OUTPUT_DIR, f"iteration_{iteration}")
         os.makedirs(iter_dir, exist_ok=True)
         
-        split_csv = os.path.join(iter_dir, f"split_iter_{iteration}.csv")
-        split_df, class_weights = create_stratified_split_and_weights(iw_augmented_df, split_csv, random_seed=42+iteration)
+        # 1. Split the ENTIRE dataset (No Leakage)
+        master_split_csv = os.path.join(iter_dir, f"master_split_iter_{iteration}.csv")
+        master_split_df = create_stratified_split(master_dataframe, master_split_csv, random_seed=42+iteration)
+        master_weights = calculate_class_weights(master_split_df)
 
-        train_ds = UniversalWaterDataset(split_df, mode='training', num_bands=10)
-        val_ds   = UniversalWaterDataset(split_df, mode='validation', num_bands=10)
-        test_ds  = UniversalWaterDataset(split_df, mode='test', num_bands=10)
+        # 2. Filter the Split to get the IW Augmented subsets
+        iw_augmented_df = master_split_df[
+            (master_split_df['source'] == 'IW') | 
+            (master_split_df['strat_group'].isin(['clouds', 'land']))
+        ].reset_index(drop=True)
+        iw_weights = calculate_class_weights(iw_augmented_df)
 
-        train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
-        val_loader   = torch.utils.data.DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
-        test_loader  = torch.utils.data.DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+        # 3. Create DataLoaders
+        # Foundation loaders (uses entire dataset)
+        found_train_ds = UniversalWaterDataset(master_split_df, mode='training', num_bands=10)
+        found_val_ds   = UniversalWaterDataset(master_split_df, mode='validation', num_bands=10)
+        found_train_loader = torch.utils.data.DataLoader(found_train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+        found_val_loader   = torch.utils.data.DataLoader(found_val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
         
+        # IW Specialized loaders (uses filtered dataset)
+        iw_train_ds = UniversalWaterDataset(iw_augmented_df, mode='training', num_bands=10)
+        iw_val_ds   = UniversalWaterDataset(iw_augmented_df, mode='validation', num_bands=10)
+        iw_test_ds  = UniversalWaterDataset(iw_augmented_df, mode='test', num_bands=10) # <-- The ultimate proving ground
+        
+        iw_train_loader = torch.utils.data.DataLoader(iw_train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS)
+        iw_val_loader   = torch.utils.data.DataLoader(iw_val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+        iw_test_loader  = torch.utils.data.DataLoader(iw_test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS)
+
         iter_results = {'iteration': iteration}
 
         # ----------------------------------------------------------------------
-        # PHASE A: Train Baseline (BigEarthNet -> Fine-Tuned)
+        # PHASE 1: Train Baseline (BigEarthNet -> Trained on IW)
         # ----------------------------------------------------------------------
-        print("\n[PHASE A] Training Baseline BigEarthNet ResNet-18...")
+        print("\n[PHASE 1] Training Baseline BigEarthNet ResNet-18 on IW...")
         model_base = HABLightningSystem(
             architecture='resnet18', num_bands=10, mode='bigearthnet',
-            weights_path=BIGEARTH_WEIGHTS, lr=1e-4, class_weights=class_weights
+            weights_path=BIGEARTH_WEIGHTS, lr=1e-4, class_weights=iw_weights
         )
         
         ckpt_cb_base = ModelCheckpoint(monitor="val_f1_macro", mode="max", save_top_k=1, filename="best-baseline-{epoch:02d}")
-        trainer_base = L.Trainer(
-            max_epochs=100, accelerator="gpu", devices=1, logger=CSVLogger(iter_dir, name="logs_baseline"), 
-            callbacks=[ckpt_cb_base, EarlyStopping(monitor="val_f1_macro", patience=20, mode="max")], enable_progress_bar=False
-        )
-        trainer_base.fit(model_base, train_loader, val_loader)
+        trainer_base = L.Trainer(max_epochs=100, accelerator="gpu", devices=1, logger=CSVLogger(iter_dir, name="logs_baseline"), 
+                                 callbacks=[ckpt_cb_base, EarlyStopping(monitor="val_f1_macro", patience=20, mode="max")], enable_progress_bar=False)
+        trainer_base.fit(model_base, iw_train_loader, iw_val_loader)
         
-        best_base = HABLightningSystem.load_from_checkpoint(ckpt_cb_base.best_model_path, class_weights=class_weights).to(DEVICE)
-        metrics_base = evaluate_split(best_base, test_loader, DEVICE, "Test_Baseline", iter_dir)
+        best_base = HABLightningSystem.load_from_checkpoint(ckpt_cb_base.best_model_path, class_weights=iw_weights).to(DEVICE)
+        metrics_base = evaluate_split(best_base, iw_test_loader, DEVICE, "Test_Baseline", iter_dir)
         for k, v in metrics_base.items(): iter_results[f"baseline_{k}"] = v
         
         del model_base, trainer_base, best_base; gc.collect(); torch.cuda.empty_cache()
 
         # ----------------------------------------------------------------------
-        # PHASE B: Evaluate Zero-Shot (Foundation Model without training)
+        # PHASE 2: Train Universal Foundation (BigEarthNet -> Trained on Master)
         # ----------------------------------------------------------------------
-        print("\n[PHASE B] Evaluating Zero-Shot Universal Foundation Model...")
-        model_zero = HABLightningSystem(
-            architecture='resnet18', num_bands=10, mode='custom_r18',
-            weights_path=UNIVERSAL_FOUNDATION_WEIGHTS, lr=1e-4, class_weights=class_weights
-        ).to(DEVICE)
+        print("\n[PHASE 2] Training Universal Foundation Model on Master Dataset...")
+        model_found = HABLightningSystem(
+            architecture='resnet18', num_bands=10, mode='bigearthnet',
+            weights_path=BIGEARTH_WEIGHTS, lr=1e-4, class_weights=master_weights
+        )
         
-        metrics_zero = evaluate_split(model_zero, test_loader, DEVICE, "Test_ZeroShot", iter_dir)
+        ckpt_cb_found = ModelCheckpoint(monitor="val_f1_macro", mode="max", save_top_k=1, filename="best-foundation-{epoch:02d}")
+        trainer_found = L.Trainer(max_epochs=100, accelerator="gpu", devices=1, logger=CSVLogger(iter_dir, name="logs_foundation"), 
+                                  callbacks=[ckpt_cb_found, EarlyStopping(monitor="val_f1_macro", patience=20, mode="max")], enable_progress_bar=False)
+        trainer_found.fit(model_found, found_train_loader, found_val_loader)
+        
+        # Zero-Shot Evaluation (Test the Foundation Model against the unseen IW Test Set!)
+        best_found_path = ckpt_cb_found.best_model_path
+        best_found = HABLightningSystem.load_from_checkpoint(best_found_path, class_weights=iw_weights).to(DEVICE) # Note: eval uses IW weights
+        
+        print("\n[Evaluating Zero-Shot Foundation on IW Test Set]...")
+        metrics_zero = evaluate_split(best_found, iw_test_loader, DEVICE, "Test_ZeroShot", iter_dir)
         for k, v in metrics_zero.items(): iter_results[f"zeroshot_{k}"] = v
         
-        del model_zero; gc.collect(); torch.cuda.empty_cache()
+        del model_found, trainer_found, best_found; gc.collect(); torch.cuda.empty_cache()
 
         # ----------------------------------------------------------------------
-        # PHASE C: Train Specialized Model (Foundation -> Fine-Tuned)
+        # PHASE 3: Train Specialized Model (Foundation -> Fine-Tuned on IW)
         # ----------------------------------------------------------------------
-        print("\n[PHASE C] Training Specialized Model from Foundation Weights...")
+        print("\n[PHASE 3] Fine-Tuning Specialized Model from Foundation Checkpoint...")
         model_ft = HABLightningSystem(
             architecture='resnet18', num_bands=10, mode='custom_r18',
-            weights_path=UNIVERSAL_FOUNDATION_WEIGHTS, lr=1e-5, class_weights=class_weights # NOTE: Ultra-low learning rate!
+            weights_path=best_found_path, lr=1e-5, class_weights=iw_weights # Load straight from Phase 2 ckpt!
         )
         
         ckpt_cb_ft = ModelCheckpoint(monitor="val_f1_macro", mode="max", save_top_k=1, filename="best-ftfound-{epoch:02d}")
-        trainer_ft = L.Trainer(
-            max_epochs=100, accelerator="gpu", devices=1, logger=CSVLogger(iter_dir, name="logs_ftfound"), 
-            callbacks=[ckpt_cb_ft, EarlyStopping(monitor="val_f1_macro", patience=20, mode="max")], enable_progress_bar=False
-        )
-        trainer_ft.fit(model_ft, train_loader, val_loader)
+        trainer_ft = L.Trainer(max_epochs=100, accelerator="gpu", devices=1, logger=CSVLogger(iter_dir, name="logs_ftfound"), 
+                               callbacks=[ckpt_cb_ft, EarlyStopping(monitor="val_f1_macro", patience=20, mode="max")], enable_progress_bar=False)
+        trainer_ft.fit(model_ft, iw_train_loader, iw_val_loader)
         
-        best_ft = HABLightningSystem.load_from_checkpoint(ckpt_cb_ft.best_model_path, class_weights=class_weights).to(DEVICE)
-        metrics_ft = evaluate_split(best_ft, test_loader, DEVICE, "Test_FT_Foundation", iter_dir)
+        best_ft = HABLightningSystem.load_from_checkpoint(ckpt_cb_ft.best_model_path, class_weights=iw_weights).to(DEVICE)
+        metrics_ft = evaluate_split(best_ft, iw_test_loader, DEVICE, "Test_FT_Foundation", iter_dir)
         for k, v in metrics_ft.items(): iter_results[f"ftfound_{k}"] = v
         
         del model_ft, trainer_ft, best_ft; gc.collect(); torch.cuda.empty_cache()
 
         # ----------------------------------------------------------------------
-        # Backup and clear
+        # Backup and clear iteration memory
         # ----------------------------------------------------------------------
         master_results.append(iter_results)
         backup_csv = os.path.join(BASE_OUTPUT_DIR, "running_backup_results.csv")
         pd.DataFrame(master_results).to_csv(backup_csv, index=False)
         print(f"\n[Iteration {iteration} Complete] Results backed up.")
         
-        del train_loader, val_loader, test_loader, train_ds, val_ds, test_ds
+        del found_train_loader, found_val_loader, iw_train_loader, iw_val_loader, iw_test_loader
         gc.collect()
 
     print("\n" + "="*60)
