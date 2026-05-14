@@ -381,7 +381,11 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
 class FocalLoss(nn.Module):
     def __init__(self, weight=None, gamma=2.0, reduction='mean'):
         super(FocalLoss, self).__init__()
-        self.weight = weight # Your class imbalance weights
+        if weight is not None:
+            self.register_buffer('weight', weight)
+        else:
+            self.weight = None
+            
         self.gamma = gamma
         self.reduction = reduction
 
