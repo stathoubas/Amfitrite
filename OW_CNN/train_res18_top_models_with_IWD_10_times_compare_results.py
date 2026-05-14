@@ -253,6 +253,9 @@ class HABLightningSystem(L.LightningModule):
         self.val_acc = MulticlassAccuracy(num_classes=2, average='micro')
         self.train_bal_acc = MulticlassAccuracy(num_classes=2, average='macro')
         self.val_bal_acc = MulticlassAccuracy(num_classes=2, average='macro')
+        
+        # Array to store outputs for granular epoch-end calculation
+        self.validation_step_outputs = []
 
     def forward(self, x): return self.model(x)
 
@@ -268,7 +271,7 @@ class HABLightningSystem(L.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y, _ = batch
+        x, y, strat_groups = batch # Unpack strat_groups here
         logits = self(x)
         loss = self.criterion(logits, y)
         preds = torch.argmax(logits, dim=1)
@@ -276,7 +279,58 @@ class HABLightningSystem(L.LightningModule):
         self.val_f1(preds, y); self.val_acc(preds, y); self.val_bal_acc(preds, y) 
         self.log("val_loss", loss, on_epoch=True)
         self.log("val_f1_macro", self.val_f1, on_epoch=True, prog_bar=True)
+        
+        # Save batch predictions for epoch-end calculations
+        self.validation_step_outputs.append({
+            'preds': preds.cpu(),
+            'targets': y.cpu(),
+            'groups': strat_groups
+        })
         return loss
+
+    def on_validation_epoch_end(self):
+        # 1. Log overall standard metrics
+        self.log("val_acc_overall", self.val_acc.compute())
+        self.log("val_bal_acc", self.val_bal_acc.compute()) 
+        
+        # 2. Extract all batches into single arrays
+        if len(self.validation_step_outputs) == 0:
+            return
+            
+        all_preds = torch.cat([x['preds'] for x in self.validation_step_outputs])
+        all_targets = torch.cat([x['targets'] for x in self.validation_step_outputs])
+        all_groups = [g for x in self.validation_step_outputs for g in x['groups']]
+        
+        # 3. Calculate Global Class Accuracies (HAB vs non-HAB)
+        hab_indices = (all_targets == 1)
+        nonhab_indices = (all_targets == 0)
+        
+        if hab_indices.any():
+            hab_acc = (all_preds[hab_indices] == all_targets[hab_indices]).float().mean()
+            self.log("val_hab_acc", hab_acc)
+            
+        if nonhab_indices.any():
+            nonhab_acc = (all_preds[nonhab_indices] == all_targets[nonhab_indices]).float().mean()
+            self.log("val_nonhab_acc", nonhab_acc)
+
+        # 4. Calculate Sub-Domain Accuracies (Land, Clouds, etc.)
+        unique_groups = ['iw_hab', 'iw_nonhab', 'ow_hab', 'ow_nonhab', 'land', 'clouds']
+        
+        for group in unique_groups:
+            indices = [i for i, g in enumerate(all_groups) if g == group]
+            if len(indices) > 0:
+                group_preds = all_preds[indices]
+                group_targets = all_targets[indices]
+                acc = (group_preds == group_targets).float().mean()
+                self.log(f"val_{group}_acc", acc)
+            else:
+                self.log(f"val_{group}_acc", 0.0) # Prevents crashing if a split has 0 images of a class
+
+        # 5. Reset for the next epoch
+        self.val_f1.reset()
+        self.val_acc.reset()
+        self.val_bal_acc.reset()
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
@@ -374,7 +428,7 @@ if __name__ == "__main__":
     IW_EXCEL = "/home/kostas/AMFITRITE/dataset_summary_256x256pixels.xlsx"
     OW_CSV = "/home/kostas/AMFITRITE/OWdata/amfitrite_open_waters_master.csv"
     
-    BASE_OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/iw_augmented_specialization"
+    BASE_OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/IW_after_OW_and_IW_comparisons"
     os.makedirs(BASE_OUTPUT_DIR, exist_ok=True)
         
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
