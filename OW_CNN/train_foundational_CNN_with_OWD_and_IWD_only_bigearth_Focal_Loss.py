@@ -422,7 +422,8 @@ class HABLightningSystem(L.LightningModule):
         # 2. Loss Function (Weighted)
         self.register_buffer("class_weights", class_weights)
         #self.criterion = torch.nn.CrossEntropyLoss(weight=self.class_weights)
-        self.criterion = FocalLoss(weight=self.class_weights, gamma=2.0)
+        self.criterion = FocalLoss(weight=self.class_weights, gamma=1.0)
+        #self.criterion = FocalLoss(weight=self.class_weights, gamma=2.0)
         
         # 3. Overall Standard Metrics
         self.train_f1 = MulticlassF1Score(num_classes=2, average='macro')
@@ -620,7 +621,7 @@ if __name__ == "__main__":
     
     EXPERIMENTS = [
         {
-            'exp_name': 'bigearthnet_resnet18_focal_loss',
+            'exp_name': 'bigearthnet_resnet18_focal_loss_gamma_1',
             'architecture': 'resnet18',
             'num_bands': 10,
             'mode': 'bigearthnet',

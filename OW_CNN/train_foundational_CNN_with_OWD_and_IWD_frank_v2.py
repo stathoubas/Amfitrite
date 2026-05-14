@@ -6,6 +6,7 @@ Created on Fri May  8 12:05:28 2026
 
 train CNNs using both OW and IW datasest
 fankenstein network resnet34: trained resnet 18 started from bigearth weights + trained resnet 34 from imagenet weightes 
+freeze resnet 18 weights and then unfreeze them.
 
 """
 import os
