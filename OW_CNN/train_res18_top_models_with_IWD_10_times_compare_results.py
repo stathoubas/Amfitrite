@@ -212,8 +212,8 @@ def build_water_cnn(architecture='resnet18', num_bands=10, mode='generic', weigh
         
         clean_dict = {}
         for k, v in state_dict.items():
-            clean_key = k.replace('model.', '') if k.startswith('model.') else k
-            clean_dict[clean_key] = v
+            if k.startswith('model.'):
+                clean_dict[k.replace('model.', '')] = v
             
         model.load_state_dict(clean_dict, strict=True)
         print("-> Foundation Weights mapped successfully.")
