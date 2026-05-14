@@ -190,11 +190,18 @@ if __name__ == "__main__":
     #csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
     #plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/class_separation"
     #architecture = "resnet18"
-
-    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/frank_v2_custom_resnet34/amfitrite_collage_resnet34_best.pth"
+    
+    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss/resnet18_bigearth_focal_loss.pth"
     csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
-    plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/frank_v2_custom_resnet34/class_separation"
-    architecture = "resnet34"
+    plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss/class_separation"
+    architecture = "resnet18"
+
+
+    #pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/frank_v2_custom_resnet34/amfitrite_collage_resnet34_best.pth"
+    #csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
+    #plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/frank_v2_custom_resnet34/class_separation"
+    #architecture = "resnet34"
+
 
     bands = 10
     
