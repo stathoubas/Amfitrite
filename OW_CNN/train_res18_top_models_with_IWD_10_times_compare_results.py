@@ -304,13 +304,18 @@ class HABLightningSystem(L.LightningModule):
         return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "monitor": "val_f1_macro"}}
 
 # ==============================================================================
-# MODULE 6: PLOTTING & EVALUATION
+# PLOTTING ENGINE (MODULE 6)
 # ==============================================================================
 
 def generate_comparison_plots(csv_path, base_output_dir):
     """
     Generates scatter plots and relative difference histograms for all 3 model combinations.
     """
+    if not os.path.exists(csv_path):
+        print(f"Error: Could not find {csv_path}")
+        print("Please ensure the path is correct and the file exists.")
+        return
+
     df = pd.read_csv(csv_path)
     
     # Base list of metrics to plot
@@ -354,7 +359,7 @@ def generate_comparison_plots(csv_path, base_output_dir):
             m_x = sc['col_x'] + m_suffix
             m_y = sc['col_y'] + m_suffix
             
-            # Ensure both columns exist and drop NaNs (e.g., if a split had 0 clouds)
+            # Ensure both columns exist and drop NaNs
             if m_x not in df.columns or m_y not in df.columns:
                 continue
                 
@@ -391,68 +396,31 @@ def generate_comparison_plots(csv_path, base_output_dir):
             # ---------------------------------------------------------
             # Calculation: 100 * (Y - X) / X
             pct_diff = 100 * (valid_df[m_y] - valid_df[m_x]) / valid_df[m_x]
+            mean_diff = pct_diff.mean()
             
             plt.figure(figsize=(8, 6))
-            # Use a diverging color scheme logic: green for positive, red for negative
-            ax = sns.histplot(pct_diff, bins=10, kde=True, color='gray', edgecolor='black')
             
-            # Add a vertical line at 0% (No improvement)
+            # The Fix: Use binwidth=0.1 and disable KDE line
+            ax = sns.histplot(pct_diff, binwidth=0.1, kde=False, color='gray', edgecolor='black')
+            
+            # Add a vertical line at 0% (No improvement baseline)
             plt.axvline(0, color='black', linestyle='--', linewidth=2, label="0% Difference")
+            
+            # Add a vertical line for the true Mean
+            plt.axvline(mean_diff, color='blue', linestyle='-', linewidth=2, label=f"Mean: {mean_diff:+.2f}%")
             
             plt.title(f"Relative Improvement: {sc['name_y']} vs {sc['name_x']}\nMetric: {title}", fontsize=14, fontweight='bold')
             plt.xlabel(f"% Improvement over {sc['name_x']}", fontsize=12)
             plt.ylabel("Count (Monte Carlo Iterations)", fontsize=12)
             plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-            plt.legend()
+            
+            # Ensure legend displays both lines clearly
+            plt.legend(loc='upper right', fontsize=12)
             plt.tight_layout()
             plt.savefig(os.path.join(duel_dir, f"hist_{m_suffix}.png"), dpi=300)
             plt.close()
-
-
-def evaluate_split(model, loader, device, split_name, output_dir):
-    model.eval()
-    all_preds, all_labels, all_groups = [], [], []
-
-    with torch.no_grad():
-        for images, labels, groups in loader:
-            images = images.to(device)
-            outputs = model(images)
-            preds = torch.argmax(outputs, dim=1)
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy())
-            all_groups.extend(groups)
-
-    print(f"\n--- Results for {split_name} ---")
-    print(classification_report(all_labels, all_preds, target_names=["nonHAB", "HAB"], zero_division=0))
-
-    cm = confusion_matrix(all_labels, all_preds)
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=["nonHAB", "HAB"], yticklabels=["nonHAB", "HAB"])
-    plt.xlabel("Predicted"); plt.ylabel("Actual"); plt.title(f"Confusion Matrix ({split_name})")
-    plt.savefig(os.path.join(output_dir, f"cm_{split_name.lower()}.png"))
-    plt.close()
-
-    results_df = pd.DataFrame({'Actual': all_labels, 'Predicted': all_preds, 'Group': all_groups})
-    results_df['Correct'] = results_df['Actual'] == results_df['Predicted']
-
-    metrics_dict = {
-        'f1': f1_score(all_labels, all_preds, average='macro'),
-        'acc': accuracy_score(all_labels, all_preds),
-        'bal_acc': balanced_accuracy_score(all_labels, all_preds)
-    }
-    
-    # Ensure Global Class Accuracies are saved (Fix from previous iteration)
-    hab_data = results_df[results_df['Actual'] == 1]
-    nonhab_data = results_df[results_df['Actual'] == 0]
-    
-    metrics_dict['hab_acc'] = hab_data['Correct'].mean() if not hab_data.empty else np.nan
-    metrics_dict['nonhab_acc'] = nonhab_data['Correct'].mean() if not nonhab_data.empty else np.nan
-    
-    for group in ['iw_hab', 'iw_nonhab', 'ow_hab', 'ow_nonhab', 'clouds', 'land']:
-        group_data = results_df[results_df['Group'] == group]
-        metrics_dict[f'{group}_acc'] = group_data['Correct'].mean() if not group_data.empty else np.nan
-
-    return metrics_dict
+            
+        print(f" -> Saved to {duel_dir}/")
 
 
 if __name__ == "__main__":

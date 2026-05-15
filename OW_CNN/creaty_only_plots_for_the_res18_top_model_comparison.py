@@ -102,18 +102,26 @@ def generate_comparison_plots(csv_path, base_output_dir):
             # ---------------------------------------------------------
             # Calculation: 100 * (Y - X) / X
             pct_diff = 100 * (valid_df[m_y] - valid_df[m_x]) / valid_df[m_x]
+            mean_diff = pct_diff.mean()
             
             plt.figure(figsize=(8, 6))
-            ax = sns.histplot(pct_diff, bins=10, kde=True, color='gray', edgecolor='black')
             
-            # Add a vertical line at 0% (No improvement)
+            # The Fix: Use binwidth=0.1 and disable KDE line
+            ax = sns.histplot(pct_diff, binwidth=0.1, kde=False, color='gray', edgecolor='black')
+            
+            # Add a vertical line at 0% (No improvement baseline)
             plt.axvline(0, color='black', linestyle='--', linewidth=2, label="0% Difference")
+            
+            # Add a vertical line for the true Mean
+            plt.axvline(mean_diff, color='blue', linestyle='-', linewidth=2, label=f"Mean: {mean_diff:+.2f}%")
             
             plt.title(f"Relative Improvement: {sc['name_y']} vs {sc['name_x']}\nMetric: {title}", fontsize=14, fontweight='bold')
             plt.xlabel(f"% Improvement over {sc['name_x']}", fontsize=12)
             plt.ylabel("Count (Monte Carlo Iterations)", fontsize=12)
             plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-            plt.legend()
+            
+            # Ensure legend displays both lines clearly
+            plt.legend(loc='upper right', fontsize=12)
             plt.tight_layout()
             plt.savefig(os.path.join(duel_dir, f"hist_{m_suffix}.png"), dpi=300)
             plt.close()
