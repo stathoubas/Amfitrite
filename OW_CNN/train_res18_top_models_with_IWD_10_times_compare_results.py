@@ -307,46 +307,107 @@ class HABLightningSystem(L.LightningModule):
 # MODULE 6: PLOTTING & EVALUATION
 # ==============================================================================
 
-def plot_paired_scatter(csv_path, output_dir):
-    """Generates individual, high-res academic scatter plots comparing Baseline vs Fine-Tuned."""
+def generate_comparison_plots(csv_path, base_output_dir):
+    """
+    Generates scatter plots and relative difference histograms for all 3 model combinations.
+    """
     df = pd.read_csv(csv_path)
     
+    # Base list of metrics to plot
     metrics = [
-        ('baseline_f1', 'ftfound_f1', 'F1 Score (Macro)', 'f1_score'),
-        ('baseline_acc', 'ftfound_acc', 'Overall Accuracy', 'accuracy_overall'),
-        ('baseline_bal_acc', 'ftfound_bal_acc', 'Balanced Accuracy', 'balanced_accuracy'),
-        ('baseline_iw_hab_acc', 'ftfound_iw_hab_acc', 'IW HABs Accuracy', 'iw_hab_acc'),
-        ('baseline_iw_nonhab_acc', 'ftfound_iw_nonhab_acc', 'IW non-HABs Accuracy', 'iw_nonhab_acc'),
-        ('baseline_land_acc', 'ftfound_land_acc', 'Land Accuracy', 'land_acc'),
-        ('baseline_clouds_acc', 'ftfound_clouds_acc', 'Clouds Accuracy', 'clouds_acc')
+        ('f1', 'F1 Score (Macro)'),
+        ('acc', 'Overall Accuracy'),
+        ('bal_acc', 'Balanced Accuracy'),
+        ('hab_acc', 'Global HAB Accuracy'),
+        ('nonhab_acc', 'Global non-HAB Accuracy'),
+        ('iw_hab_acc', 'IW HABs Accuracy'),
+        ('iw_nonhab_acc', 'IW non-HABs Accuracy'),
+        ('land_acc', 'Land Accuracy'),
+        ('clouds_acc', 'Clouds Accuracy')
     ]
     
-    os.makedirs(output_dir, exist_ok=True)
+    # Define the 3 duels
+    scenarios = [
+        {
+            'col_x': 'baseline_', 'col_y': 'zeroshot_', 
+            'name_x': 'Baseline', 'name_y': 'Zero-Shot', 
+            'folder': 'duel_1_baseline_vs_zeroshot'
+        },
+        {
+            'col_x': 'baseline_', 'col_y': 'ftfound_', 
+            'name_x': 'Baseline', 'name_y': 'Fine-Tuned', 
+            'folder': 'duel_2_baseline_vs_ftfound'
+        },
+        {
+            'col_x': 'zeroshot_', 'col_y': 'ftfound_', 
+            'name_x': 'Zero-Shot', 'name_y': 'Fine-Tuned', 
+            'folder': 'duel_3_zeroshot_vs_ftfound'
+        }
+    ]
     
-    for m_base, m_ft, title, filename in metrics:
-        valid_df = df.dropna(subset=[m_base, m_ft])
-        if len(valid_df) == 0: continue
+    for sc in scenarios:
+        duel_dir = os.path.join(base_output_dir, sc['folder'])
+        os.makedirs(duel_dir, exist_ok=True)
+        print(f"\n[*] Generating plots for: {sc['name_x']} vs {sc['name_y']}")
+        
+        for m_suffix, title in metrics:
+            m_x = sc['col_x'] + m_suffix
+            m_y = sc['col_y'] + m_suffix
             
-        plt.figure(figsize=(8, 8))
-        sns.scatterplot(x=valid_df[m_base], y=valid_df[m_ft], s=150, color='blue', edgecolor='black', alpha=0.8)
-        
-        min_val = min(valid_df[m_base].min(), valid_df[m_ft].min()) - 0.02
-        max_val = max(valid_df[m_base].max(), valid_df[m_ft].max()) + 0.02
-        
-        plt.xlim(min_val, max_val); plt.ylim(min_val, max_val)
-        plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--', linewidth=2, label="Parity (y = x)")
-        
-        plt.fill_between([min_val, max_val], [min_val, max_val], max_val, color='green', alpha=0.05, label="Foundation Wins")
-        plt.fill_between([min_val, max_val], min_val, [min_val, max_val], color='red', alpha=0.05, label="Baseline Wins")
-        
-        plt.title(f"Monte Carlo Duel: {title}", fontsize=16, fontweight='bold')
-        plt.xlabel("Baseline (BigEarthNet) Score", fontsize=14)
-        plt.ylabel("Fine-Tuned (Foundation) Score", fontsize=14)
-        plt.grid(True, linestyle=':', alpha=0.7)
-        plt.legend(loc='upper left', fontsize=12)
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, f"scatter_{filename}.png"), dpi=300)
-        plt.close()
+            # Ensure both columns exist and drop NaNs (e.g., if a split had 0 clouds)
+            if m_x not in df.columns or m_y not in df.columns:
+                continue
+                
+            valid_df = df.dropna(subset=[m_x, m_y])
+            if len(valid_df) == 0: 
+                continue
+                
+            # ---------------------------------------------------------
+            # 1. SCATTER PLOT
+            # ---------------------------------------------------------
+            plt.figure(figsize=(8, 8))
+            sns.scatterplot(x=valid_df[m_x], y=valid_df[m_y], s=150, color='blue', edgecolor='black', alpha=0.8)
+            
+            min_val = min(valid_df[m_x].min(), valid_df[m_y].min()) - 0.02
+            max_val = max(valid_df[m_x].max(), valid_df[m_y].max()) + 0.02
+            
+            plt.xlim(min_val, max_val); plt.ylim(min_val, max_val)
+            plt.plot([min_val, max_val], [min_val, max_val], color='red', linestyle='--', linewidth=2, label="Parity (y = x)")
+            
+            plt.fill_between([min_val, max_val], [min_val, max_val], max_val, color='green', alpha=0.05, label=f"{sc['name_y']} Wins")
+            plt.fill_between([min_val, max_val], min_val, [min_val, max_val], color='red', alpha=0.05, label=f"{sc['name_x']} Wins")
+            
+            plt.title(f"Monte Carlo Duel: {title}", fontsize=16, fontweight='bold')
+            plt.xlabel(f"{sc['name_x']} Score", fontsize=14)
+            plt.ylabel(f"{sc['name_y']} Score", fontsize=14)
+            plt.grid(True, linestyle=':', alpha=0.7)
+            plt.legend(loc='upper left', fontsize=12)
+            plt.tight_layout()
+            plt.savefig(os.path.join(duel_dir, f"scatter_{m_suffix}.png"), dpi=300)
+            plt.close()
+
+            # ---------------------------------------------------------
+            # 2. BINNED HISTOGRAM (Percentage Difference)
+            # ---------------------------------------------------------
+            # Calculation: 100 * (Y - X) / X
+            pct_diff = 100 * (valid_df[m_y] - valid_df[m_x]) / valid_df[m_x]
+            
+            plt.figure(figsize=(8, 6))
+            # Use a diverging color scheme logic: green for positive, red for negative
+            ax = sns.histplot(pct_diff, bins=10, kde=True, color='gray', edgecolor='black')
+            
+            # Add a vertical line at 0% (No improvement)
+            plt.axvline(0, color='black', linestyle='--', linewidth=2, label="0% Difference")
+            
+            plt.title(f"Relative Improvement: {sc['name_y']} vs {sc['name_x']}\nMetric: {title}", fontsize=14, fontweight='bold')
+            plt.xlabel(f"% Improvement over {sc['name_x']}", fontsize=12)
+            plt.ylabel("Count (Monte Carlo Iterations)", fontsize=12)
+            plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(os.path.join(duel_dir, f"hist_{m_suffix}.png"), dpi=300)
+            plt.close()
+
 
 def evaluate_split(model, loader, device, split_name, output_dir):
     model.eval()
@@ -379,6 +440,13 @@ def evaluate_split(model, loader, device, split_name, output_dir):
         'acc': accuracy_score(all_labels, all_preds),
         'bal_acc': balanced_accuracy_score(all_labels, all_preds)
     }
+    
+    # Ensure Global Class Accuracies are saved (Fix from previous iteration)
+    hab_data = results_df[results_df['Actual'] == 1]
+    nonhab_data = results_df[results_df['Actual'] == 0]
+    
+    metrics_dict['hab_acc'] = hab_data['Correct'].mean() if not hab_data.empty else np.nan
+    metrics_dict['nonhab_acc'] = nonhab_data['Correct'].mean() if not nonhab_data.empty else np.nan
     
     for group in ['iw_hab', 'iw_nonhab', 'ow_hab', 'ow_nonhab', 'clouds', 'land']:
         group_data = results_df[results_df['Group'] == group]
@@ -534,5 +602,4 @@ if __name__ == "__main__":
     final_csv_path = os.path.join(BASE_OUTPUT_DIR, "final_duel_results.csv")
     pd.DataFrame(master_results).to_csv(final_csv_path, index=False)
     
-    plot_output_dir = os.path.join(BASE_OUTPUT_DIR, "scatter_plots")
-    plot_paired_scatter(final_csv_path, plot_output_dir)
+    generate_comparison_plots(final_csv_path, BASE_OUTPUT_DIR)
