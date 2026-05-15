@@ -394,13 +394,10 @@ def generate_comparison_plots(csv_path, base_output_dir):
             # ---------------------------------------------------------
             # 2. BINNED HISTOGRAM (Percentage Difference)
             # ---------------------------------------------------------
-            # Calculation: 100 * (Y - X) / X
             pct_diff = 100 * (valid_df[m_y] - valid_df[m_x]) / valid_df[m_x]
             mean_diff = pct_diff.mean()
             
             plt.figure(figsize=(8, 6))
-            
-            # The Fix: Use binwidth=0.1 and disable KDE line
             ax = sns.histplot(pct_diff, binwidth=0.1, kde=False, color='gray', edgecolor='black')
             
             # Add a vertical line at 0% (No improvement baseline)
@@ -421,6 +418,51 @@ def generate_comparison_plots(csv_path, base_output_dir):
             plt.close()
             
         print(f" -> Saved to {duel_dir}/")
+
+
+def evaluate_split(model, loader, device, split_name, output_dir):
+    model.eval()
+    all_preds, all_labels, all_groups = [], [], []
+
+    with torch.no_grad():
+        for images, labels, groups in loader:
+            images = images.to(device)
+            outputs = model(images)
+            preds = torch.argmax(outputs, dim=1)
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+            all_groups.extend(groups)
+
+    print(f"\n--- Results for {split_name} ---")
+    print(classification_report(all_labels, all_preds, target_names=["nonHAB", "HAB"], zero_division=0))
+
+    cm = confusion_matrix(all_labels, all_preds)
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=["nonHAB", "HAB"], yticklabels=["nonHAB", "HAB"])
+    plt.xlabel("Predicted"); plt.ylabel("Actual"); plt.title(f"Confusion Matrix ({split_name})")
+    plt.savefig(os.path.join(output_dir, f"cm_{split_name.lower()}.png"))
+    plt.close()
+
+    results_df = pd.DataFrame({'Actual': all_labels, 'Predicted': all_preds, 'Group': all_groups})
+    results_df['Correct'] = results_df['Actual'] == results_df['Predicted']
+
+    metrics_dict = {
+        'f1': f1_score(all_labels, all_preds, average='macro'),
+        'acc': accuracy_score(all_labels, all_preds),
+        'bal_acc': balanced_accuracy_score(all_labels, all_preds)
+    }
+    
+    hab_data = results_df[results_df['Actual'] == 1]
+    nonhab_data = results_df[results_df['Actual'] == 0]
+    
+    metrics_dict['hab_acc'] = hab_data['Correct'].mean() if not hab_data.empty else np.nan
+    metrics_dict['nonhab_acc'] = nonhab_data['Correct'].mean() if not nonhab_data.empty else np.nan
+    
+    for group in ['iw_hab', 'iw_nonhab', 'ow_hab', 'ow_nonhab', 'clouds', 'land']:
+        group_data = results_df[results_df['Group'] == group]
+        metrics_dict[f'{group}_acc'] = group_data['Correct'].mean() if not group_data.empty else np.nan
+
+    return metrics_dict
 
 
 if __name__ == "__main__":
