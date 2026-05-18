@@ -391,9 +391,17 @@ if __name__ == "__main__":
     
     harmonizer = DatasetHarmonizer(IW_DIR, OW_DIR, IW_EXCEL, OW_CSV)
     master_dataframe = harmonizer.create_master_registry()
-    master_results = []
+    
+    START_ITERATION = 4
+    backup_file = os.path.join(BASE_OUTPUT_DIR, "running_backup_results.csv")
+    
+    if os.path.exists(backup_file) and START_ITERATION > 1:
+        print(f"\n[*] Resuming experiment. Loading past results from {backup_file}...")
+        master_results = pd.read_csv(backup_file).to_dict('records')
+    else:
+        master_results = []
 
-    for iteration in range(1, TOTAL_ITERATIONS + 1):
+    for iteration in range(START_ITERATION, TOTAL_ITERATIONS + 1):
         print("\n" + "X"*70)
         print(f"XXX MASTER ABLATION ITERATION {iteration}/{TOTAL_ITERATIONS} XXX")
         print("X"*70)
