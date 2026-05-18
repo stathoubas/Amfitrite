@@ -392,7 +392,7 @@ if __name__ == "__main__":
     harmonizer = DatasetHarmonizer(IW_DIR, OW_DIR, IW_EXCEL, OW_CSV)
     master_dataframe = harmonizer.create_master_registry()
     
-    START_ITERATION = 4
+    START_ITERATION = 6
     backup_file = os.path.join(BASE_OUTPUT_DIR, "running_backup_results.csv")
     
     if os.path.exists(backup_file) and START_ITERATION > 1:
