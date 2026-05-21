@@ -210,11 +210,13 @@ if __name__ == "__main__":
     SPLIT_CSV_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
     
     # The path to your best model (.ckpt or .pth)
-    #MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/logs/version_0/checkpoints/best-hab-epoch=29-val_f1_macro=0.864.ckpt"
-    MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal_loss.pth"
-    
+    #MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal_loss.pth"
     # Where to save the plots and CSVs
-    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/Operational_Sensitivity_Analysis"
+    #OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/Operational_Sensitivity_Analysis"
+    
+    # the standard network
+    MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth"
+    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/Operational_Sensitivity_Analysis"
     
     ARCHITECTURE = 'resnet18'  # or 'resnet34'
     BATCH_SIZE = 64
