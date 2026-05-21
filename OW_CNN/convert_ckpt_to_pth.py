@@ -68,4 +68,8 @@ if __name__ == "__main__":
     INPUT_CKPT = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_1/logs/version_0/checkpoints/best-hab-epoch=21-val_f1_macro=0.877.ckpt"
     OUTPUT_PTH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_1/resnet18_bigearth_focal_loss_gamma_1.pth"
     
+    INPUT_CKPT = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/logs/version_0/checkpoints/best-hab-epoch=35-val_f1_macro=0.880.ckpt"
+    OUTPUT_PTH = "home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best_ep_35.pth"
+
+    
     convert_ckpt_to_raw_pth(INPUT_CKPT, OUTPUT_PTH)
