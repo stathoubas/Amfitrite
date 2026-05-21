@@ -210,7 +210,8 @@ if __name__ == "__main__":
     SPLIT_CSV_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
     
     # The path to your best model (.ckpt or .pth)
-    MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/logs/version_0/checkpoints/best-hab-epoch=29-val_f1_macro=0.864.ckpt"
+    #MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/logs/version_0/checkpoints/best-hab-epoch=29-val_f1_macro=0.864.ckpt"
+    MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal_loss.pth"
     
     # Where to save the plots and CSVs
     OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/Operational_Sensitivity_Analysis"
@@ -241,9 +242,15 @@ if __name__ == "__main__":
         # If it's a PyTorch Lightning Checkpoint, extract the state dict
         checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
         state_dict = checkpoint['state_dict']
-        # Remove 'model.' prefix added by Lightning
-        state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
-        model.load_state_dict(state_dict, strict=True)
+        
+        # FIX: Only extract keys belonging to the actual neural network 
+        # (Ignore Lightning buffers like class_weights and criterion)
+        clean_state_dict = {
+            k.replace('model.', ''): v 
+            for k, v in state_dict.items() 
+            if k.startswith('model.')
+        }
+        model.load_state_dict(clean_state_dict, strict=True)
     else:
         # If it's a standard PyTorch .pth file
         model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
