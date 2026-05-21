@@ -215,8 +215,11 @@ if __name__ == "__main__":
     #OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/Operational_Sensitivity_Analysis"
     
     # the standard network
-    MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth"
-    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/Operational_Sensitivity_Analysis"
+    #MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth"
+    #OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/Operational_Sensitivity_Analysis"
+    MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best_ep_35.pth"
+    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/Operational_Sensitivity_Analysis_ep_35"
+
     
     ARCHITECTURE = 'resnet18'  # or 'resnet34'
     BATCH_SIZE = 64
