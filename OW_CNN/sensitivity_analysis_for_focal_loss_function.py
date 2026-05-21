@@ -216,7 +216,7 @@ if __name__ == "__main__":
     
     # the standard network
     MODEL_PATH = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best.pth"
-    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/Operational_Sensitivity_Analysis"
+    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/Operational_Sensitivity_Analysis"
     
     ARCHITECTURE = 'resnet18'  # or 'resnet34'
     BATCH_SIZE = 64
