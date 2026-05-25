@@ -139,7 +139,7 @@ def plot_ieee_class_separation(data_dict, split_name, output_path):
     # Log scale is mandatory for these density plots to see the overlap
     ax.set_yscale('log')
     ax.set_xlim(-0.02, 1.02)
-    ax.set_ylim(0.05, 10)
+    ax.set_ylim(0.05, 20)
     
     # IEEE Labels using full words, strictly 8pt
     ax.set_xlabel("Prediction Score", fontsize=8, labelpad=1)
@@ -168,12 +168,13 @@ def plot_ieee_class_separation(data_dict, split_name, output_path):
 # ==============================================================================
 if __name__ == "__main__":
     
-    #pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal_loss.pth"
     csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
-    #plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/for_paper/class_separation"
+
+    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal_loss.pth"
+    plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/for_paper/class_separation"
     
-    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best_ep_35.pth"
-    plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/for_paper/bigearthnet_resnet18_universal"
+    #pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/amfitrite_resnet18_bigearth_best_ep_35.pth"
+    #plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18/for_paper/bigearthnet_resnet18_universal"
     
     
     architecture = "resnet18"
