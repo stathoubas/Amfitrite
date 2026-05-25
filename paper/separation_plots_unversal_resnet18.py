@@ -167,7 +167,7 @@ def plot_ieee_class_separation(data_dict, split_name, output_path):
 # ==============================================================================
 if __name__ == "__main__":
     
-    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal_loss_gamma.pth"
+    pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/resnet18_bigearth_focal.pth"
     csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
     plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_2/for_paper/class_separation"
     
