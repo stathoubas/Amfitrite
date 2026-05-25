@@ -169,7 +169,7 @@ if __name__ == "__main__":
     
     pth_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_1/resnet18_bigearth_focal_loss_gamma_1.pth"
     csv_path_name = "/home/kostas/AMFITRITE/IW_and_OW_CNN/amfitrite_universal_split.csv"
-    plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_1/class_separation"
+    plot_path_name_prefix = "/home/kostas/AMFITRITE/IW_and_OW_CNN/bigearthnet_resnet18_focal_loss_gamma_1/for_paper/class_separation"
     
     architecture = "resnet18"
     bands = 10
