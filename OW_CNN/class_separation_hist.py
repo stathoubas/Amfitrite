@@ -170,6 +170,7 @@ def plot_separated_panels(data_dict, output_path, title):
         
         ax.set_yscale('log')
         ax.set_xlim(-0.02, 1.02)
+        ax.set_ylim(0.01, 40)
         ax.set_title(p_title, fontsize=14)
         #ax.set_xlabel("Predicted Probability of being a HAB", fontsize=12)
         ax.set_xlabel("Prediction Score", fontsize=12)
