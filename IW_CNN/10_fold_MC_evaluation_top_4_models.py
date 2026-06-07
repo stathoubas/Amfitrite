@@ -235,14 +235,14 @@ if __name__ == "__main__":
 
     # Model Configurations to evaluate
     MODELS_CONFIG = [
-        {'name': 'RDNet_NoMask', 'model_type': 'rdnet_base', 'apply_mask': False},
-        {'name': 'ConvNeXt_NoMask', 'model_type': 'convnextv2_base', 'apply_mask': False},
-        {'name': 'ResNet18_Mask', 'model_type': 'resnet18', 'apply_mask': True},
-        {'name': 'ResNet18_NoMask', 'model_type': 'resnet18', 'apply_mask': False}
+        {'name': 'RDNet_NoMask', 'model_type': 'rdnet_base', 'apply_mask': False, "BATCH_SIZE":8, "NUM_WORKERS":4},
+        {'name': 'ConvNeXt_NoMask', 'model_type': 'convnextv2_base', 'apply_mask': False, "BATCH_SIZE":8, "NUM_WORKERS":4},
+        {'name': 'ResNet18_Mask', 'model_type': 'resnet18', 'apply_mask': True, "BATCH_SIZE":64, "NUM_WORKERS":8},
+        {'name': 'ResNet18_NoMask', 'model_type': 'resnet18', 'apply_mask': False, "BATCH_SIZE":64, "NUM_WORKERS":8}
     ]
 
-    BATCH_SIZE = 64
-    NUM_WORKERS = 8
+    #BATCH_SIZE = 64
+    #NUM_WORKERS = 8
     MAX_EPOCHS = 60
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -267,10 +267,10 @@ if __name__ == "__main__":
             val_ds = HABMonteCarloDataset(split_df, DATA_ROOT, mode='validation', apply_mask=config['apply_mask'])
             test_ds = HABMonteCarloDataset(split_df, DATA_ROOT, mode='test', apply_mask=config['apply_mask'])
             
-            train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, persistent_workers=True)
-            val_loader = torch.utils.data.DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
-            test_loader = torch.utils.data.DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
-            eval_train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, persistent_workers=True)
+            train_loader = torch.utils.data.DataLoader(train_ds, batch_size=config['BATCH_SIZE'], shuffle=True, num_workers=config['NUM_WORKERS'], persistent_workers=True)
+            val_loader = torch.utils.data.DataLoader(val_ds, batch_size=config['BATCH_SIZE'], shuffle=False, num_workers=config['NUM_WORKERS'], persistent_workers=True)
+            test_loader = torch.utils.data.DataLoader(test_ds, batch_size=config['BATCH_SIZE'], shuffle=False, num_workers=config['NUM_WORKERS'], persistent_workers=True)
+            eval_train_loader = torch.utils.data.DataLoader(train_ds, batch_size=config['BATCH_SIZE'], shuffle=False, num_workers=config['NUM_WORKERS'], persistent_workers=True)
             
             # 3. Setup Model, Callbacks, and Trainer
             model = HABUnifiedLightningModel(
