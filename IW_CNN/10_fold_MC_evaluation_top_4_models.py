@@ -321,6 +321,10 @@ if __name__ == "__main__":
                     'Accuracy': metrics['Accuracy'],
                     'Balanced_Accuracy': metrics['Balanced_Accuracy']
                 })
+                
+            results_df = pd.DataFrame(master_results)
+            excel_out_path = os.path.join(OUTPUT_DIR, "Master_Monte_Carlo_IWD_Results.xlsx")
+            results_df.to_excel(excel_out_path, index=False)
             
             # Clean up memory
             del model, best_model, trainer, train_loader, val_loader, test_loader, eval_train_loader
