@@ -235,8 +235,8 @@ if __name__ == "__main__":
 
     # Model Configurations to evaluate
     MODELS_CONFIG = [
-        {'name': 'RDNet_NoMask', 'model_type': 'rdnet_base', 'apply_mask': False, "BATCH_SIZE":8, "NUM_WORKERS":4},
-        {'name': 'ConvNeXt_NoMask', 'model_type': 'convnextv2_base', 'apply_mask': False, "BATCH_SIZE":8, "NUM_WORKERS":4},
+        {'name': 'RDNet_NoMask', 'model_type': 'rdnet_base', 'apply_mask': False, "BATCH_SIZE":16, "NUM_WORKERS":8},
+        {'name': 'ConvNeXt_NoMask', 'model_type': 'convnextv2_base', 'apply_mask': False, "BATCH_SIZE":16, "NUM_WORKERS":8},
         {'name': 'ResNet18_Mask', 'model_type': 'resnet18', 'apply_mask': True, "BATCH_SIZE":64, "NUM_WORKERS":8},
         {'name': 'ResNet18_NoMask', 'model_type': 'resnet18', 'apply_mask': False, "BATCH_SIZE":64, "NUM_WORKERS":8}
     ]
