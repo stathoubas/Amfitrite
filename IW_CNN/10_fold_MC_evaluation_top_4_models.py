@@ -224,7 +224,7 @@ if __name__ == "__main__":
     
     EXCEL_PATH = "/home/kostas/AMFITRITE/dataset_summary.xlsx"
     DATA_ROOT = "/home/kostas/AMFITRITE/data"
-    OUTPUT_DIR = "/home/kostas/AMFITRITE/monte_carlo_results"
+    OUTPUT_DIR = "/home/kostas/AMFITRITE/IW/monte_carlo_results"
     
     # Path mappings for weights
     WEIGHTS_PATHS = {
@@ -243,7 +243,7 @@ if __name__ == "__main__":
 
     #BATCH_SIZE = 64
     #NUM_WORKERS = 8
-    MAX_EPOCHS = 60
+    MAX_EPOCHS = 100
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -285,7 +285,7 @@ if __name__ == "__main__":
                 monitor="val_f1", mode="max", save_top_k=1, filename="best-checkpoint"
             )
             early_stop_callback = EarlyStopping(
-                monitor="val_f1", patience=20, mode="max", verbose=False
+                monitor="val_f1", patience=15, mode="max", verbose=False
             )
             
             trainer = L.Trainer(
